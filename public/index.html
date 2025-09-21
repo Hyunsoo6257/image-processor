@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image Processor</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        background: #ffffff;
+        color: #000000;
+        line-height: 1.6;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+
+      .header {
+        border-bottom: 1px solid #000000;
+        padding-bottom: 20px;
+        margin-bottom: 30px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .logo {
+        font-size: 24px;
+        font-weight: 600;
+        color: #000000;
+      }
+
+      .nav-links {
+        display: flex;
+        gap: 15px;
+        align-items: center;
+        margin-right: 15px;
+      }
+
+      .btn {
+        padding: 6px 12px;
+        border: 1px solid #000000;
+        background: #ffffff;
+        color: #000000;
+        cursor: pointer;
+        font-size: 13px;
+        transition: all 0.2s ease;
+        text-decoration: none;
+        display: inline-block;
+        border-radius: 3px;
+      }
+
+      .btn:hover {
+        background: #000000;
+        color: #ffffff;
+      }
+
+      .btn-primary {
+        background: #000000;
+        color: #ffffff;
+      }
+
+      .btn-primary:hover {
+        background: #333333;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        gap: 30px;
+        margin-bottom: 30px;
+      }
+
+      .section {
+        border: 1px solid #000000;
+        padding: 20px;
+      }
+
+      .section-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 15px;
+        border-bottom: 1px solid #000000;
+        padding-bottom: 10px;
+      }
+
+      .form-group {
+        margin-bottom: 15px;
+      }
+
+      .form-label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 500;
+      }
+
+      .form-input,
+      .form-select {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #000000;
+        background: #ffffff;
+        font-size: 14px;
+      }
+
+      .form-input:focus,
+      .form-select:focus {
+        outline: 2px solid #000000;
+        outline-offset: -2px;
+      }
+
+      .jobs-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+      }
+
+      .jobs-table th,
+      .jobs-table td {
+        border: 1px solid #000000;
+        padding: 10px;
+        text-align: left;
+      }
+
+      .jobs-table th {
+        background: #f5f5f5;
+        font-weight: 600;
+      }
+
+      .status {
+        padding: 4px 8px;
+        border: 1px solid #000000;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .status-pending {
+        background: #ffffff;
+      }
+
+      .status-processing {
+        background: #f5f5f5;
+      }
+
+      .status-completed {
+        background: #000000;
+        color: #ffffff;
+      }
+
+      .status-failed {
+        background: #ffffff;
+        border-color: #000000;
+      }
+
+      .progress {
+        width: 100%;
+        height: 20px;
+        border: 1px solid #000000;
+        background: #ffffff;
+        margin: 10px 0;
+      }
+
+      .progress-bar {
+        height: 100%;
+        background: #000000;
+        transition: width 0.3s ease;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .loading {
+        text-align: center;
+        padding: 20px;
+      }
+
+      .spinner {
+        border: 2px solid #f3f3f3;
+        border-top: 2px solid #000000;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 10px;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      .alert {
+        padding: 15px;
+        margin: 15px 0;
+        border: 1px solid #000000;
+      }
+
+      .alert-success {
+        background: #f5f5f5;
+      }
+
+      .alert-danger {
+        background: #ffffff;
+        border-color: #000000;
+      }
+
+      .filters {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 15px;
+      }
+
+      .pagination {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 5px;
+        margin-top: 20px;
+      }
+
+      .pagination button {
+        padding: 8px 12px;
+        border: 1px solid #000000;
+        background: #ffffff;
+        color: #000000;
+        cursor: pointer;
+        font-size: 14px;
+        min-width: 40px;
+      }
+
+      .pagination button:hover:not(:disabled) {
+        background: #000000;
+        color: #ffffff;
+      }
+
+      .pagination button:disabled {
+        background: #f5f5f5;
+        color: #999999;
+        cursor: not-allowed;
+        border-color: #cccccc;
+      }
+
+      .pagination button.active {
+        background: #000000;
+        color: #ffffff;
+      }
+
+      /* Sorting styles */
+      .sortable {
+        position: relative;
+        user-select: none;
+        transition: background-color 0.2s;
+      }
+
+      .sortable:hover {
+        background-color: #f0f0f0;
+      }
+
+      .sortable::after {
+        content: " ↕";
+        color: #ccc;
+        font-weight: normal;
+        font-size: 12px;
+      }
+
+      .sort-asc::after {
+        content: " ↑";
+        color: #000000;
+        font-weight: bold;
+      }
+
+      .sort-desc::after {
+        content: " ↓";
+        color: #000000;
+        font-weight: bold;
+      }
+
+      /* New styles for random image feature */
+      .image-selection-section {
+        margin-bottom: 20px;
+      }
+
+      .random-method {
+        margin-bottom: 20px;
+      }
+
+      .preview-container img {
+        max-width: 100%;
+        max-height: 300px;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      .preview-info {
+        margin: 15px 0;
+      }
+
+      .preview-info h6 {
+        margin-bottom: 5px;
+        font-weight: 600;
+      }
+
+      .preview-info small {
+        color: #666;
+      }
+
+      .source-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        background: #007bff;
+        color: white;
+        border-radius: 12px;
+        font-size: 11px;
+        margin-top: 5px;
+      }
+
+      .btn-group {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+
+      .btn-success {
+        background: #28a745;
+        color: white;
+        border-color: #28a745;
+      }
+
+      .btn-success:hover {
+        background: #218838;
+        border-color: #1e7e34;
+      }
+
+      .btn-info {
+        background: #17a2b8;
+        color: white;
+        border-color: #17a2b8;
+      }
+
+      .btn-info:hover {
+        background: #138496;
+        border-color: #117a8b;
+      }
+
+      .btn-outline-primary {
+        background: transparent;
+        color: #007bff;
+        border-color: #007bff;
+      }
+
+      .btn-outline-primary:hover {
+        background: #007bff;
+        color: white;
+      }
+
+      .btn-danger {
+        background: #000000;
+        color: white;
+        border-color: #000000;
+      }
+
+      .btn-danger:hover {
+        background: #333333;
+        border-color: #333333;
+      }
+
+      .selected-image-section {
+        margin-top: 15px;
+      }
+
+      .alert-success {
+        background: #d4edda;
+        border-color: #c3e6cb;
+        color: #155724;
+      }
+
+      .preview-section {
+        min-height: 180px;
+        border: 2px dashed #ddd;
+        border-radius: 8px;
+        background-color: #fafafa;
+        margin: 20px 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .preview-section:hover {
+        border-color: #ccc;
+        background-color: #f5f5f5;
+      }
+
+      .preview-container {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 15px;
+        position: relative;
+      }
+
+      .preview-placeholder {
+        text-align: center;
+        color: #888;
+        max-width: 250px;
+        z-index: 1;
+      }
+
+      .preview-icon {
+        font-size: 48px;
+        margin-bottom: 15px;
+        opacity: 0.6;
+      }
+
+      .preview-text {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+
+      .preview-subtext {
+        font-size: 13px;
+        color: #999;
+      }
+
+      .preview-content {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 8px;
+        z-index: 2;
+      }
+
+      .preview-image {
+        max-width: 100%;
+        max-height: 120px;
+        border-radius: 6px;
+        margin-bottom: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        object-fit: cover;
+      }
+
+      .preview-info {
+        text-align: center;
+        margin-bottom: 8px;
+      }
+
+      .preview-info h6 {
+        font-size: 14px;
+        margin-bottom: 2px;
+        font-weight: 600;
+      }
+
+      @media (max-width: 768px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .header {
+          flex-direction: column;
+          gap: 15px;
+          text-align: center;
+        }
+
+        .user-info {
+          justify-content: center;
+        }
+
+        .jobs-table {
+          font-size: 12px;
+        }
+
+        .filters {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .btn-group {
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <!-- Header -->
+      <div class="header">
+        <div class="logo">Image Processor</div>
+
+        <!-- Login Form (shown when not logged in) -->
+        <div id="login-section">
+          <form
+            id="login-form"
+            style="display: flex; gap: 10px; align-items: center"
+          >
+            <input
+              type="text"
+              id="username"
+              placeholder="Username"
+              class="form-input"
+              style="width: 120px"
+              required
+            />
+            <input
+              type="password"
+              id="password"
+              placeholder="Password"
+              class="form-input"
+              style="width: 120px"
+              required
+            />
+            <button type="submit" class="btn btn-primary">Login</button>
+          </form>
+        </div>
+
+        <!-- Navigation and User Info (shown when logged in) -->
+        <div id="user-section" class="hidden">
+          <div class="nav-links">
+            <a href="index.html" class="btn btn-primary">Home</a>
+            <a href="mypage.html" class="btn">My Page</a>
+            <span id="current-user"></span>
+            <button id="logout-btn" class="btn">Logout</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Grid -->
+      <div class="grid">
+        <!-- Image Selection & Processing Section -->
+        <div class="section left-panel">
+          <div class="section-title">Image Selection & Processing</div>
+
+          <!-- Image Selection Section -->
+          <div class="image-selection-section">
+            <!-- Method 1: File Upload -->
+            <div class="upload-method">
+              <h6>Upload Your Image</h6>
+
+              <div style="margin-top: 15px">
+                <input
+                  type="file"
+                  id="file-input"
+                  accept="image/*"
+                  style="
+                    width: 100%;
+                    padding: 8px 12px;
+                    border: 1px solid #000;
+                    background: #fff;
+                    cursor: pointer;
+                  "
+                />
+              </div>
+            </div>
+
+            <!-- Divider -->
+            <div style="text-align: center; margin: 20px 0">
+              <span style="background: #fff; padding: 0 10px; color: #666"
+                >OR</span
+              >
+              <hr
+                style="
+                  margin-top: -10px;
+                  border: none;
+                  border-top: 1px solid #e0e0e0;
+                "
+              />
+            </div>
+
+            <!-- Method 2: Random Image Generation -->
+            <div class="random-method">
+              <h6>Generate Random Image</h6>
+              <div
+                class="row"
+                style="display: flex; gap: 10px; margin-bottom: 15px"
+              >
+                <div style="flex: 1">
+                  <input
+                    type="text"
+                    id="search-input"
+                    class="form-input"
+                    placeholder="Search for images (e.g., 'mountain sunset', 'portrait', 'food')"
+                  />
+                </div>
+                <div>
+                  <button
+                    class="btn btn-primary"
+                    onclick="generateRandomImage()"
+                  >
+                    Generate
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Image Preview Section -->
+            <div id="image-preview-section" class="preview-section">
+              <div class="preview-container">
+                <div id="preview-placeholder" class="preview-placeholder">
+                  <div class="preview-text">Preview</div>
+                  <div class="preview-subtext">
+                    Generate or upload to see preview
+                  </div>
+                </div>
+
+                <div id="preview-content" class="preview-content hidden">
+                  <img id="image-preview" class="preview-image" alt="Preview" />
+
+                  <div class="preview-info">
+                    <h6 id="image-title">Image Title</h6>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Upload Button (Always Visible) -->
+            <div style="margin-top: 20px; text-align: center">
+              <button
+                id="upload-btn"
+                class="btn btn-primary"
+                style="width: 100%; padding: 12px; font-size: 16px"
+              >
+                Upload Image
+              </button>
+            </div>
+
+            <!-- Upload Progress -->
+            <div id="upload-progress" class="hidden" style="margin-top: 15px">
+              <div class="progress">
+                <div
+                  id="upload-progress-bar"
+                  class="progress-bar"
+                  style="width: 0%"
+                ></div>
+              </div>
+              <div
+                id="upload-status"
+                style="text-align: center; margin-top: 5px"
+              >
+                Uploading...
+              </div>
+            </div>
+
+            <!-- Selected Image Section -->
+            <div id="selected-image-section" class="hidden">
+              <div class="alert alert-success">
+                <h6>Image Selected</h6>
+                <p id="selected-image-info">Ready to process</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Processing Options Section -->
+          <div
+            style="
+              margin-top: 30px;
+              padding-top: 20px;
+              border-top: 1px solid #000000;
+            "
+          >
+            <h4 style="margin-bottom: 15px">Processing Options</h4>
+
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 15px;
+                margin-bottom: 20px;
+              "
+            >
+              <div class="form-group">
+                <label class="form-label">Width (px)</label>
+                <input
+                  type="number"
+                  id="batch-width"
+                  class="form-input"
+                  placeholder="Auto"
+                />
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Height (px)</label>
+                <input
+                  type="number"
+                  id="batch-height"
+                  class="form-input"
+                  placeholder="Auto"
+                />
+              </div>
+            </div>
+
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 15px;
+                margin-bottom: 20px;
+              "
+            >
+              <div class="form-group">
+                <label class="form-label">Format</label>
+                <select id="batch-format" class="form-select">
+                  <option value="">Keep original</option>
+                  <option value="jpeg">JPEG</option>
+                  <option value="png">PNG</option>
+                  <option value="webp">WebP</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Quality (1-100)</label>
+                <input
+                  type="number"
+                  id="batch-quality"
+                  class="form-input"
+                  min="1"
+                  max="100"
+                  value="80"
+                />
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 10px; align-items: center">
+              <button
+                id="process-selected"
+                class="btn btn-primary"
+                style="flex: 1"
+              >
+                Process Selected Files
+              </button>
+              <button id="clear-selection" class="btn">Clear</button>
+            </div>
+
+            <div
+              style="
+                margin-top: 10px;
+                text-align: center;
+                font-size: 14px;
+                color: #666;
+              "
+            >
+              <span id="selected-count">0 files selected</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Uploaded Files Section -->
+        <div class="section right-panel">
+          <div class="section-title">Uploaded Files</div>
+
+          <!-- File Management Controls -->
+          <div class="filters">
+            <button id="refresh-files" class="btn">Refresh</button>
+          </div>
+
+          <!-- Files & Jobs Table -->
+          <div id="files-loading" class="loading hidden">
+            <div class="spinner"></div>
+            <div>Loading files...</div>
+          </div>
+
+          <div id="files-list">
+            <table class="jobs-table">
+              <thead>
+                <tr>
+                  <th style="width: 30px">
+                    <input type="checkbox" id="select-all" title="Select All" />
+                  </th>
+                  <th
+                    class="sortable"
+                    data-sort="filename"
+                    style="cursor: pointer"
+                  >
+                    Filename
+                  </th>
+                  <th
+                    class="sortable"
+                    data-sort="status"
+                    style="cursor: pointer"
+                  >
+                    Status
+                  </th>
+                  <th class="sortable" data-sort="size" style="cursor: pointer">
+                    Size
+                  </th>
+                  <th class="sortable" data-sort="date" style="cursor: pointer">
+                    Date
+                  </th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="files-tbody"></tbody>
+            </table>
+          </div>
+
+          <div id="pagination" class="pagination"></div>
+
+          <!-- Pagination Info -->
+          <div
+            style="
+              text-align: center;
+              margin-top: 10px;
+              font-size: 14px;
+              color: #666;
+            "
+          >
+            <span id="pagination-info">Showing 0 of 0 files</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Alerts -->
+      <div id="alerts"></div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,61 @@
+{
+  "name": "image-processor",
+  "version": "1.0.0",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "nodemon --exec \"node --loader ts-node/esm\" src/server.ts",
+    "start": "node --loader ts-node/esm src/server.ts",
+    "start:prod": "node dist/server.js",
+    "load-test": "chmod +x scripts/loadTest.sh && ./scripts/loadTest.sh",
+    "clean": "rm -rf dist",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "docker:build": "docker build -t image-processor .",
+    "docker:tag": "docker tag image-processor:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/image-processor:latest",
+    "docker:push": "docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/image-processor:latest",
+    "deploy:full": "npm run docker:build && npm run docker:tag && npm run docker:push"
+  },
+  "keywords": [
+    "image-processing",
+    "typescript",
+    "postgresql",
+    "express"
+  ],
+  "author": "",
+  "license": "ISC",
+  "description": "CPU-intensive image processing service with TypeScript and PostgreSQL",
+  "dependencies": {
+    "@types/aws-sdk": "^0.0.42",
+    "@types/nodemailer": "^7.0.1",
+    "@types/pg": "^8.15.5",
+    "aws-sdk": "^2.1692.0",
+    "axios": "^1.11.0",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "node-fetch": "^2.7.0",
+    "nodemailer": "^7.0.5",
+    "pg": "^8.16.3",
+    "sharp": "^0.34.3"
+  },
+  "type": "module",
+  "devDependencies": {
+    "@aws-cdk/aws-ec2": "^1.203.0",
+    "@aws-cdk/aws-ecr": "^1.203.0",
+    "@aws-cdk/aws-ecs": "^1.203.0",
+    "@aws-cdk/aws-rds": "^1.203.0",
+    "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/ms": "^2.1.0",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.5.2",
+    "@types/sharp": "^0.31.1",
+    "aws-cdk": "^2.1026.0",
+    "aws-cdk-lib": "^2.212.0",
+    "constructs": "^10.4.2",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  }
+}
