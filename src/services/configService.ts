@@ -122,23 +122,21 @@ export class ConfigService {
 
       // Load configuration parameters
       const configParams = await this.getParameters([
-        "/image-processor/config/app-name",
-        "/image-processor/config/s3-bucket-name",
-        "/image-processor/config/aws-region",
-        "/image-processor/config/application-url",
-        "/image-processor/config/application-domain",
-        "/image-processor/config/feature-flags",
+        "/n11837845/config/app-name",
+        "/n11837845/config/s3-bucket-name",
+        "/n11837845/config/aws-region",
+        "/n11837845/config/application-url",
+        "/n11837845/config/application-domain",
+        "/n11837845/config/feature-flags",
       ]);
 
       // Load secrets
       const dbCredentials = await this.getSecret(
-        "image-processor/database-credentials"
+        "n11837845/database-credentials"
       );
-      const jwtSecret = await this.getSecret("image-processor/jwt-secret");
-      const s3Config = await this.getSecret("image-processor/s3-config");
-      const appSecrets = await this.getSecret(
-        "image-processor/application-secrets"
-      );
+      const jwtSecret = await this.getSecret("n11837845/jwt-secret");
+      const s3Config = await this.getSecret("n11837845/s3-config");
+      const appSecrets = await this.getSecret("n11837845/application-secrets");
 
       // Set environment variables
       process.env.DB_HOST = dbCredentials.host;
@@ -157,6 +155,14 @@ export class ConfigService {
 
       process.env.NODE_ENV = appSecrets.nodeEnv;
       process.env.PORT = appSecrets.port;
+
+      // Store feature flags in cache for getFeatureFlags() to use
+      if (configParams["feature-flags"]) {
+        this.configCache.set(
+          "/n11837845/config/feature-flags",
+          configParams["feature-flags"]
+        );
+      }
 
       console.log("✅ Configuration loaded successfully");
       console.log("📊 Loaded parameters:", Object.keys(configParams).length);
@@ -183,7 +189,7 @@ export class ConfigService {
   static async getFeatureFlags(): Promise<Record<string, boolean>> {
     try {
       const flagsJson = await this.getParameter(
-        "/image-processor/config/feature-flags"
+        "/n11837845/config/feature-flags"
       );
       return JSON.parse(flagsJson);
     } catch (error) {

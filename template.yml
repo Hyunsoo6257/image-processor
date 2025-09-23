@@ -1,0 +1,142 @@
+Resources:
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      # Allow EC2 service to assume this role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      # Attach AWS managed policy for SSM (Session Manager)
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      # Inline policy with least-privilege access for S3, SSM Parameter Store, and Secrets Manager
+      Policies:
+        - PolicyName: ImageProcessorAppAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Allow access to the specific S3 bucket used by the app
+              - Sid: S3BucketAccess
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - arn:aws:s3:::a2-n11837845-image-processor
+              - Sid: S3ObjectAccess
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - arn:aws:s3:::a2-n11837845-image-processor/*
+              # Allow reading app configuration from SSM Parameter Store
+              - Sid: SSMParameterRead
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/n11837845/*
+              # Allow reading secrets for the app from Secrets Manager
+              - Sid: SecretsManagerRead
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:n11837845/*
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2Role
+
+  ImageProcessorEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: ap-southeast-2c
+      # Attach the instance profile so Session Manager and app permissions work
+      IamInstanceProfile: CAB432-Instance-Role
+      ImageId:
+        Ref: SsmParameterValueawsserviceamiamazonlinuxlatestal2023amikernel61x8664C96584B6F00A464EAD1953AFF4B05118Parameter
+      InstanceType: t3.micro
+      SecurityGroupIds:
+        - sg-032bd1ff8cf77dbb9
+      SubnetId: subnet-05d0352bb15852524
+      Tags:
+        - Key: Name
+          Value: ImageProcessorStack/ImageProcessorEC2Instance
+        - Key: purpose
+          Value: assessment2
+        - Key: qut-username
+          Value: n11837845@qut.edu.au
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y docker
+          systemctl start docker
+          systemctl enable docker
+          usermod -a -G docker ec2-user
+          yum install -y git
+          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+          nvm install 22
+          nvm use 22
+          cd /home/ec2-user
+          git clone https://github.com/Hyunsoo6257/image-processor.git
+          cd image-processor
+          npm install
+          npm run build
+          npm start
+    Metadata:
+      aws:cdk:path: ImageProcessorStack/ImageProcessorEC2Instance
+Parameters:
+  SsmParameterValueawsserviceamiamazonlinuxlatestal2023amikernel61x8664C96584B6F00A464EAD1953AFF4B05118Parameter:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64
+Outputs:
+  VPCId:
+    Description: VPC ID for the Image Processor application
+    Value: vpc-007bab53289655834
+  S3BucketName:
+    Description: S3 bucket name for image storage
+    Value: a2-n11837845-image-processor
+  S3BucketArn:
+    Description: S3 bucket ARN for image storage
+    Value: arn:aws:s3:::a2-n11837845-image-processor
+  EC2InstanceId:
+    Description: EC2 instance ID
+    Value:
+      Ref: ImageProcessorEC2Instance
+  EC2PublicIP:
+    Description: EC2 instance public IP address
+    Value:
+      Fn::GetAtt:
+        - ImageProcessorEC2Instance
+        - PublicIp
+  EC2PublicDNS:
+    Description: EC2 instance public DNS name
+    Value:
+      Fn::GetAtt:
+        - ImageProcessorEC2Instance
+        - PublicDnsName
+  ApplicationURL:
+    Description: Application URL
+    Value:
+      Fn::Join:
+        - ""
+        - - http://
+          - Fn::GetAtt:
+              - ImageProcessorEC2Instance
+              - PublicDnsName
+          - :3000
+  ManualRoute53Setup:
+    Description: Route53 setup instruction
+    Value: "Please create CNAME record manually: n11837845-image-processor.cab432.com -> EC2 Public DNS"

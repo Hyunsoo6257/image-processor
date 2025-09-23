@@ -3,7 +3,7 @@ import authRoutes from "./routes/auth.js";
 import filesRoutes from "./routes/files.js";
 import jobsRoutes from "./routes/jobs.js";
 import creditsRoutes from "./routes/credits.js";
-import { initializeDatabase, testConnection } from "./models/database.js";
+
 import { EmailService } from "./services/emailService.js";
 import { ConfigService } from "./services/configService.js";
 
@@ -96,6 +96,11 @@ async function startServer(): Promise<void> {
     // Initialize configuration from AWS services
     console.log("🔧 Loading configuration from AWS services...");
     await ConfigService.initializeConfig();
+
+    // Import database module AFTER config is loaded so pool picks up env vars
+    const { initializeDatabase, testConnection } = await import(
+      "./models/database.js"
+    );
 
     // test database connection
     console.log("📊 Testing database connection...");
