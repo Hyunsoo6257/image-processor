@@ -25,6 +25,7 @@
   "license": "ISC",
   "description": "CPU-intensive image processing service with TypeScript and PostgreSQL",
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.896.0",
     "@types/aws-sdk": "^0.0.42",
     "@types/nodemailer": "^7.0.1",
     "@types/pg": "^8.15.5",

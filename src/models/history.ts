@@ -1,4 +1,4 @@
-import { pool, withTransaction } from "./database.js";
+import { getPool, withTransaction } from "./database.js";
 
 // ===================================
 // Processing history functions
@@ -79,7 +79,7 @@ export async function getUserProcessingHistory(
   username: string,
   limit: number = 50
 ): Promise<any[]> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     const query = `
       SELECT 
@@ -105,7 +105,7 @@ export async function getUserProcessingHistory(
 export async function getJobProcessingHistory(
   jobId: number
 ): Promise<any | null> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     const query = `
       SELECT 
@@ -127,7 +127,7 @@ export async function getJobProcessingHistory(
  * Get system statistics
  */
 export async function getSystemStats(): Promise<any[]> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     const query = `
       SELECT 
@@ -154,7 +154,7 @@ export async function getProcessingStats(): Promise<{
   averageProcessingTime: number;
   totalUsers: number;
 }> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     const query = `
       SELECT 

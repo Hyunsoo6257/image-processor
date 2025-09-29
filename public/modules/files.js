@@ -261,7 +261,7 @@ export function initFiles() {
     }
   }
 
-  // Handle file upload
+  // Handle file upload using pre-signed URLs
   async function handleFileUpload(file) {
     // Prevent duplicate uploads
     if (uploadBtn.disabled) {
@@ -275,23 +275,67 @@ export function initFiles() {
     // Show upload progress
     uploadProgress.classList.remove("hidden");
     uploadProgressBar.style.width = "0%";
-    uploadStatus.textContent = "Uploading...";
-
-    const formData = new FormData();
-    formData.append("file", file);
+    uploadStatus.textContent = "Getting pre-signed URL...";
 
     try {
-      const response = await fetch("/files", {
+      // Step 1: Get pre-signed URL from our server
+      const presignedResponse = await fetch("/files/presigned-upload", {
         method: "POST",
         headers: {
+          "Content-Type": "application/json",
           Authorization: `Bearer ${localStorage.getItem("token")}`,
         },
-        body: formData,
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type,
+        }),
       });
 
-      const result = await response.json();
+      const presignedResult = await presignedResponse.json();
 
-      if (result.success) {
+      if (!presignedResult.success) {
+        throw new Error(
+          presignedResult.error || "Failed to get pre-signed URL"
+        );
+      }
+
+      uploadStatus.textContent = "Uploading directly to S3...";
+      uploadProgressBar.style.width = "50%";
+
+      // Step 2: Upload directly to S3 using pre-signed URL
+      const s3Response = await fetch(presignedResult.data.presignedUrl, {
+        method: "PUT",
+        body: file,
+        headers: {
+          "Content-Type": file.type,
+        },
+      });
+
+      if (!s3Response.ok) {
+        throw new Error(`S3 upload failed: ${s3Response.statusText}`);
+      }
+
+      uploadProgressBar.style.width = "75%";
+      uploadStatus.textContent = "Saving file metadata...";
+
+      // Step 3: Save file metadata to database
+      const metadataResponse = await fetch("/files", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: JSON.stringify({
+          filename: file.name,
+          s3Key: presignedResult.data.s3Key,
+          size: file.size,
+          type: file.type,
+        }),
+      });
+
+      const metadataResult = await metadataResponse.json();
+
+      if (metadataResult.success) {
         uploadProgressBar.style.width = "100%";
         uploadStatus.textContent = "Upload completed!";
 
@@ -462,45 +506,55 @@ export function initFiles() {
     window.updateBatchControls();
   }
 
-  // Authenticated download helper
+  // Authenticated download helper using pre-signed URLs
   window.downloadFileSecure = async function (filename) {
     try {
       if (!window.validateDownload || !window.validateDownload(filename)) {
         return;
       }
 
-      const resp = await fetch(
-        `/files/download/${encodeURIComponent(filename)}`,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
-      );
+      // Step 1: Get pre-signed download URL from our server
+      const presignedResponse = await fetch("/files/presigned-download", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: JSON.stringify({
+          filename: filename,
+        }),
+      });
 
-      if (!resp.ok) {
-        // Try to read error message if JSON
-        let message = `Download failed (status ${resp.status})`;
-        try {
-          const data = await resp.json();
-          if (data?.error) message = data.error;
-        } catch {}
-        showAlert(message, "danger");
-        return;
+      const presignedResult = await presignedResponse.json();
+
+      if (!presignedResult.success) {
+        throw new Error(
+          presignedResult.error || "Failed to get pre-signed download URL"
+        );
       }
 
-      const blob = await resp.blob();
+      // Step 2: Download directly from S3 using pre-signed URL
+      const s3Response = await fetch(presignedResult.data.presignedUrl);
+
+      if (!s3Response.ok) {
+        throw new Error(`S3 download failed: ${s3Response.statusText}`);
+      }
+
+      // Step 3: Create download link and trigger download
+      const blob = await s3Response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = filename;
       document.body.appendChild(a);
       a.click();
-      a.remove();
       window.URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error("Secure download error:", e);
-      showAlert("Failed to download file", "danger");
+      document.body.removeChild(a);
+
+      showAlert(`File "${filename}" downloaded successfully!`, "success");
+    } catch (error) {
+      console.error("Download error:", error);
+      showAlert(`Download failed: ${error.message}`, "danger");
     }
   };
 

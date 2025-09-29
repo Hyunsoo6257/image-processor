@@ -12,13 +12,13 @@ export interface User {
 export type UserRole = "admin" | "user";
 
 export interface AuthenticatedUser {
-  id: number;
+  id: string;
   username: string;
   role: UserRole;
 }
 
 export interface LoginRequest {
-  username: string;
+  email: string; // Changed from username to email for Cognito
   password: string;
 }
 
@@ -59,6 +59,9 @@ export interface ProcessingResult {
   processedAt?: Date;
   s3Key?: string;
   error?: string;
+  frameUrls?: string[];
+  variationUrls?: string[];
+  analysisUrls?: string[];
 }
 
 export interface CreateJobRequest {
@@ -150,7 +153,7 @@ export interface ProcessingHistory {
 
 export interface StressTestRequest {
   iterations?: number;
-  sampleImage: string;
+  sampleImageS3Key: string;
 }
 
 export interface StressTestResponse {

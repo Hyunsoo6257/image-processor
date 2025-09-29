@@ -3,7 +3,7 @@ import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
 import { authenticateToken } from "../middleware/auth.js";
-import { pool } from "../models/database.js";
+import { getPool } from "../models/database.js";
 import { ImageProcessor } from "../services/imageProcessor.js";
 import { ExternalAPIService } from "../services/externalAPIService.js";
 import { S3Service } from "../services/s3Service.js";
@@ -35,24 +35,24 @@ const upload = multer({
 // Get all files for the authenticated user
 router.get("/", authenticateToken, async (req, res) => {
   try {
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
 
     try {
       const query = `
-        SELECT * FROM files 
+        SELECT * FROM s302.files 
         WHERE user_id = $1 
         ORDER BY uploaded_at DESC 
         LIMIT $2 OFFSET $3
       `;
 
-      const result = await pool.query(query, [userId, limit, offset]);
+      const result = await getPool().query(query, [userId, limit, offset]);
 
       // Get total count
-      const countQuery = "SELECT COUNT(*) FROM files WHERE user_id = $1";
-      const countResult = await pool.query(countQuery, [userId]);
+      const countQuery = "SELECT COUNT(*) FROM s302.files WHERE user_id = $1";
+      const countResult = await getPool().query(countQuery, [userId]);
 
       res.json({
         success: true,
@@ -83,23 +83,69 @@ router.get("/", authenticateToken, async (req, res) => {
   }
 });
 
-// Upload a file
-router.post("/", authenticateToken, upload.single("file"), async (req, res) => {
+// Upload a file (supports both direct upload and pre-signed URL metadata)
+router.post("/", authenticateToken, async (req, res) => {
   try {
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
+    const username = req.user!.username;
+
+    // Check if this is a pre-signed URL metadata request
+    if (req.body.s3Key) {
+      // Handle pre-signed URL upload metadata
+      const { filename, s3Key, size, type } = req.body;
+
+      if (!filename || !s3Key) {
+        return res.status(400).json({
+          success: false,
+          error: "Filename and S3 key are required",
+        });
+      }
+
+      try {
+        // Save file metadata to database
+        const query = `
+          INSERT INTO s302.files (filename, user_id, size, type, s3_key, uploaded_at)
+          VALUES ($1, $2, $3, $4, $5, NOW())
+          RETURNING id
+        `;
+
+        const result = await getPool().query(query, [
+          filename,
+          userId,
+          size || 0,
+          type || "input",
+          s3Key,
+        ]);
+
+        res.json({
+          success: true,
+          fileId: result.rows[0].id,
+          filename: filename,
+          message: "File metadata saved successfully",
+        });
+      } catch (dbError) {
+        console.error("Database error:", dbError);
+        res.status(500).json({
+          success: false,
+          error: "Failed to save file metadata",
+        });
+      }
+      return;
+    }
+
+    // Handle direct file upload (legacy)
     if (!req.file) {
       return res.status(400).json({
         success: false,
         error: "No file uploaded",
       });
     }
-
-    const userId = req.user!.id;
     const fileSize = req.file.size;
     const originalName = req.file.originalname;
     const mimeType = req.file.mimetype;
 
-    // Generate S3 key and filename
-    const s3Key = S3Service.generateUserKey(userId, originalName);
+    // Generate S3 key and filename using username
+    const s3Key = S3Service.generateUserKey(username, originalName);
     const filename = s3Key.split("/").pop()!; // Extract filename from S3 key
 
     try {
@@ -112,12 +158,12 @@ router.post("/", authenticateToken, upload.single("file"), async (req, res) => {
 
       // Save file info to database
       const query = `
-        INSERT INTO files (filename, user_id, size, type, s3_key, uploaded_at)
+        INSERT INTO s302.files (filename, user_id, size, type, s3_key, uploaded_at)
         VALUES ($1, $2, $3, $4, $5, NOW())
         RETURNING id
       `;
 
-      const result = await pool.query(query, [
+      const result = await getPool().query(query, [
         filename,
         userId,
         fileSize,
@@ -156,12 +202,13 @@ router.post("/", authenticateToken, upload.single("file"), async (req, res) => {
 router.get("/download/:filename", authenticateToken, async (req, res) => {
   try {
     const filename = req.params.filename;
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
 
     try {
       // Check if user owns this file and get S3 key
-      const query = "SELECT * FROM files WHERE filename = $1 AND user_id = $2";
-      const result = await pool.query(query, [filename, userId]);
+      const query =
+        "SELECT * FROM s302.files WHERE filename = $1 AND user_id = $2";
+      const result = await getPool().query(query, [filename, userId]);
 
       if (result.rows.length === 0) {
         return res.status(404).json({
@@ -204,10 +251,10 @@ router.get("/download/:filename", authenticateToken, async (req, res) => {
 router.get("/metadata/:fileId", authenticateToken, async (req, res) => {
   try {
     const fileId = req.params.fileId;
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
 
-    const query = "SELECT * FROM files WHERE id = $1 AND user_id = $2";
-    const result = await pool.query(query, [fileId, userId]);
+    const query = "SELECT * FROM s302.files WHERE id = $1 AND user_id = $2";
+    const result = await getPool().query(query, [fileId, userId]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -217,11 +264,10 @@ router.get("/metadata/:fileId", authenticateToken, async (req, res) => {
     }
 
     const file = result.rows[0];
-    const filePath = path.join(__dirname, "../../data/in", file.filename);
 
-    // Extract metadata using ImageProcessor
+    // Extract metadata using ImageProcessor (stateless)
     try {
-      const metadata = await ImageProcessor.extractMetadata(filePath);
+      const metadata = await ImageProcessor.extractMetadata(file.s3_key);
       res.json({
         success: true,
         data: {
@@ -285,7 +331,8 @@ router.get("/random-image", authenticateToken, async (req, res) => {
 router.post("/download-random-image", authenticateToken, async (req, res) => {
   try {
     const { imageUrl, searchTerm } = req.body;
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
+    const username = req.user!.username;
 
     if (!imageUrl) {
       return res.status(400).json({
@@ -297,7 +344,7 @@ router.post("/download-random-image", authenticateToken, async (req, res) => {
     const result = await ExternalAPIService.downloadRandomImage(
       imageUrl,
       searchTerm,
-      userId
+      userId // userId is already a number
     );
 
     if (result.success) {
@@ -326,7 +373,7 @@ router.post("/download-random-image", authenticateToken, async (req, res) => {
 router.delete("/:filename", authenticateToken, async (req, res) => {
   try {
     const filename = req.params.filename;
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
 
     // Validate filename for security
     if (
@@ -342,8 +389,9 @@ router.delete("/:filename", authenticateToken, async (req, res) => {
 
     try {
       // Check if user owns this file (database mode)
-      const query = "SELECT * FROM files WHERE filename = $1 AND user_id = $2";
-      const result = await pool.query(query, [filename, userId]);
+      const query =
+        "SELECT * FROM s302.files WHERE filename = $1 AND user_id = $2";
+      const result = await getPool().query(query, [filename, userId]);
 
       if (result.rows.length === 0) {
         return res.status(404).json({
@@ -352,38 +400,33 @@ router.delete("/:filename", authenticateToken, async (req, res) => {
         });
       }
 
+      const file = result.rows[0];
+
       // Delete file from database
-      await pool.query(
-        "DELETE FROM files WHERE filename = $1 AND user_id = $2",
+      await getPool().query(
+        "DELETE FROM s302.files WHERE filename = $1 AND user_id = $2",
         [filename, userId]
       );
 
       // Delete related jobs
-      await pool.query("DELETE FROM jobs WHERE file_id = $1", [filename]);
+      await getPool().query("DELETE FROM s302.jobs WHERE file_id = $1", [
+        filename,
+      ]);
+
+      // Delete original file from S3 (stateless)
+      if (file.s3_key) {
+        try {
+          await S3Service.deleteFile(file.s3_key);
+        } catch (error) {
+          console.warn("Failed to delete S3 file:", error);
+        }
+      }
     } catch (dbError) {
       console.warn(
         "Database not available for delete check, proceeding with file system only:",
         dbError
       );
       // In memory mode, proceed with file system deletion
-    }
-
-    // Delete original file from disk
-    const inputPath = path.join(__dirname, "../../data/in", filename);
-    if (fs.existsSync(inputPath)) {
-      fs.unlinkSync(inputPath);
-    }
-
-    // Find and delete related output files
-    const outputDir = path.join(__dirname, "../../data/out");
-    if (fs.existsSync(outputDir)) {
-      const outputFiles = fs.readdirSync(outputDir);
-      for (const outputFile of outputFiles) {
-        if (outputFile.includes(filename.replace(path.extname(filename), ""))) {
-          const outputPath = path.join(outputDir, outputFile);
-          fs.unlinkSync(outputPath);
-        }
-      }
     }
 
     res.json({
@@ -403,7 +446,8 @@ router.delete("/:filename", authenticateToken, async (req, res) => {
 router.post("/presigned-upload", authenticateToken, async (req, res) => {
   try {
     const { filename, contentType } = req.body;
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
+    const username = req.user!.username;
 
     if (!filename) {
       return res.status(400).json({
@@ -412,8 +456,8 @@ router.post("/presigned-upload", authenticateToken, async (req, res) => {
       });
     }
 
-    // Generate S3 key for the file
-    const s3Key = S3Service.generateUserKey(userId, filename);
+    // Generate S3 key for the file using username
+    const s3Key = S3Service.generateUserKey(username, filename);
 
     // Generate presigned URL for upload
     const presignedUrl = S3Service.generatePresignedUploadUrl(
@@ -442,7 +486,7 @@ router.post("/presigned-upload", authenticateToken, async (req, res) => {
 router.post("/presigned-download", authenticateToken, async (req, res) => {
   try {
     const { filename } = req.body;
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
 
     if (!filename) {
       return res.status(400).json({
@@ -453,8 +497,8 @@ router.post("/presigned-download", authenticateToken, async (req, res) => {
 
     // Check if user owns this file and get S3 key
     const query =
-      "SELECT s3_key FROM files WHERE filename = $1 AND user_id = $2";
-    const result = await pool.query(query, [filename, userId]);
+      "SELECT s3_key FROM s302.files WHERE filename = $1 AND user_id = $2";
+    const result = await getPool().query(query, [filename, userId]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({

@@ -1,11 +1,25 @@
 import AWS from "aws-sdk";
 
 export class S3Service {
-  private static s3 = new AWS.S3({
-    region: process.env.AWS_REGION || "ap-southeast-2",
-  });
-  private static bucketName =
-    process.env.S3_BUCKET_NAME || "image-processor-s302-bucket";
+  private static s3: AWS.S3 | null = null;
+  private static bucketName: string | null = null;
+
+  private static getS3(): AWS.S3 {
+    if (!this.s3) {
+      this.s3 = new AWS.S3({
+        region: process.env.AWS_REGION || "ap-southeast-2",
+      });
+    }
+    return this.s3;
+  }
+
+  private static getBucketName(): string {
+    if (!this.bucketName) {
+      this.bucketName =
+        process.env.S3_BUCKET_NAME || "image-processor-s302-bucket";
+    }
+    return this.bucketName;
+  }
 
   /**
    * Upload file to S3
@@ -16,13 +30,13 @@ export class S3Service {
     contentType: string = "image/jpeg"
   ): Promise<string> {
     const params = {
-      Bucket: this.bucketName,
+      Bucket: this.getBucketName(),
       Key: key,
       Body: file,
       ContentType: contentType,
     };
 
-    const result = await this.s3.upload(params).promise();
+    const result = await this.getS3().upload(params).promise();
     return result.Location;
   }
 
@@ -31,11 +45,11 @@ export class S3Service {
    */
   static async downloadFile(key: string): Promise<Buffer> {
     const params = {
-      Bucket: this.bucketName,
+      Bucket: this.getBucketName(),
       Key: key,
     };
 
-    const result = await this.s3.getObject(params).promise();
+    const result = await this.getS3().getObject(params).promise();
     return result.Body as Buffer;
   }
 
@@ -47,13 +61,13 @@ export class S3Service {
     contentType: string = "image/jpeg"
   ): string {
     const params = {
-      Bucket: this.bucketName,
+      Bucket: this.getBucketName(),
       Key: key,
       ContentType: contentType,
       Expires: 3600, // 1 hour
     };
 
-    return this.s3.getSignedUrl("putObject", params);
+    return this.getS3().getSignedUrl("putObject", params);
   }
 
   /**
@@ -61,12 +75,12 @@ export class S3Service {
    */
   static generatePresignedDownloadUrl(key: string): string {
     const params = {
-      Bucket: this.bucketName,
+      Bucket: this.getBucketName(),
       Key: key,
       Expires: 3600, // 1 hour
     };
 
-    return this.s3.getSignedUrl("getObject", params);
+    return this.getS3().getSignedUrl("getObject", params);
   }
 
   /**
@@ -74,11 +88,11 @@ export class S3Service {
    */
   static async deleteFile(key: string): Promise<void> {
     const params = {
-      Bucket: this.bucketName,
+      Bucket: this.getBucketName(),
       Key: key,
     };
 
-    await this.s3.deleteObject(params).promise();
+    await this.getS3().deleteObject(params).promise();
   }
 
   /**
@@ -86,9 +100,9 @@ export class S3Service {
    */
   static async fileExists(key: string): Promise<boolean> {
     try {
-      await this.s3
+      await this.getS3()
         .headObject({
-          Bucket: this.bucketName,
+          Bucket: this.getBucketName(),
           Key: key,
         })
         .promise();
@@ -103,9 +117,9 @@ export class S3Service {
    */
   static async getFileMetadata(key: string): Promise<any> {
     try {
-      const result = await this.s3
+      const result = await this.getS3()
         .headObject({
-          Bucket: this.bucketName,
+          Bucket: this.getBucketName(),
           Key: key,
         })
         .promise();
@@ -116,25 +130,25 @@ export class S3Service {
   }
 
   /**
-   * Generate user-specific S3 key
+   * Generate user-specific S3 key using username
    */
-  static generateUserKey(userId: number, filename: string): string {
+  static generateUserKey(username: string, filename: string): string {
     const timestamp = Date.now();
     const extension = filename.split(".").pop();
     const baseName = filename.replace(/\.[^/.]+$/, "");
-    return `user_${userId}/${timestamp}-${baseName}.${extension}`;
+    return `${username}/${timestamp}-${baseName}.${extension}`;
   }
 
   /**
    * Generate processed file S3 key
    */
   static generateProcessedKey(
-    userId: number,
+    username: string,
     jobId: number,
     filename: string
   ): string {
     const extension = filename.split(".").pop();
     const baseName = filename.replace(/\.[^/.]+$/, "");
-    return `user_${userId}/processed/${jobId}-${baseName}.${extension}`;
+    return `${username}/processed/${jobId}-${baseName}.${extension}`;
   }
 }

@@ -6,10 +6,7 @@ import creditsRoutes from "./routes/credits.js";
 
 import { EmailService } from "./services/emailService.js";
 import { ConfigService } from "./services/configService.js";
-
-// Load environment variables from .env file
-import dotenv from "dotenv";
-dotenv.config();
+import { CognitoService } from "./services/cognitoService.js";
 
 const app = express();
 
@@ -97,7 +94,18 @@ async function startServer(): Promise<void> {
     console.log("🔧 Loading configuration from AWS services...");
     await ConfigService.initializeConfig();
 
-    // Import database module AFTER config is loaded so pool picks up env vars
+    // Initialize Cognito service and migrate users
+    console.log("🔐 Initializing Cognito service...");
+    const cognitoService = CognitoService.getInstance();
+    cognitoService.initialize(); // Initialize with actual config values
+    try {
+      await cognitoService.migrateExistingUsers();
+    } catch (error) {
+      console.log(
+        "⚠️ Cognito migration failed, continuing without migration:",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
     const { initializeDatabase, testConnection } = await import(
       "./models/database.js"
     );
@@ -107,9 +115,10 @@ async function startServer(): Promise<void> {
     const dbConnected = await testConnection();
 
     if (dbConnected) {
-      // initialize database
-      console.log("🗄️ Initializing database...");
-      await initializeDatabase();
+      // Skip database initialization - schema already exists
+      console.log(
+        "🗄️ Database connection successful - skipping initialization (schema already exists)"
+      );
     } else {
       console.log("⚠️ Database not available, running in memory-only mode");
     }
@@ -119,7 +128,13 @@ async function startServer(): Promise<void> {
       console.log(`✅ API listening on http://0.0.0.0:${PORT}`);
       console.log("📋 Available endpoints:");
       console.log("  GET  /health - Health check");
-      console.log("  POST /auth/login - User authentication");
+      console.log("  POST /auth/login - User authentication (email/password)");
+      console.log("  POST /auth/register - User registration");
+      console.log("  GET  /auth/google-auth-url - Get Google OAuth URL");
+      console.log("  GET  /auth/google/callback - Google OAuth callback");
+      console.log("  POST /auth/mfa/challenge - Respond to MFA challenge");
+      console.log("  POST /auth/mfa/setup - Setup MFA token");
+      console.log("  POST /auth/mfa/verify - Verify MFA token");
       console.log("  GET  /auth/me - Get current user");
       console.log("  POST /files - File upload");
       console.log("  GET  /files - List files");
@@ -130,14 +145,12 @@ async function startServer(): Promise<void> {
       console.log("  GET  /jobs/:id - Get job details");
       console.log("  POST /jobs/stress-test - CPU stress test (admin only)");
       console.log("");
-      console.log("🔑 Default users:");
-      console.log("  admin/admin123 (admin role)");
-      console.log("  user1/user123 (user role)");
+      console.log("🔑 Default users (migrated to Cognito):");
+      console.log("  admin@example.com/admin123 (admin role)");
+      console.log("  user1@example.com/user123 (user role)");
       console.log("");
       console.log("🐘 Database: PostgreSQL (with MySQL fallback)");
-      console.log(
-        "📁 Data storage: ./data/in (uploads), ./data/out (processed)"
-      );
+      console.log("📁 Data storage: S3 (stateless)");
     });
   } catch (error) {
     console.error("❌ Failed to start server:", error);

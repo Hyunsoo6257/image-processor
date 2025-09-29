@@ -1,5 +1,5 @@
 import axios from "axios";
-import { pool } from "../models/database.js";
+import { getPool } from "../models/database.js";
 import { ImageProcessor } from "./imageProcessor.js";
 import { EmailService } from "./emailService.js";
 import fs from "fs/promises";
@@ -283,7 +283,7 @@ export class ExternalAPIService {
   static async downloadRandomImage(
     imageUrl: string,
     searchTerm: string,
-    userId: number
+    userId: string
   ): Promise<{
     success: boolean;
     fileId?: number;
@@ -310,24 +310,31 @@ export class ExternalAPIService {
       try {
         // Save image to database
         const query = `
-          INSERT INTO files (filename, user_id, size, type, uploaded_at)
-          VALUES ($1, $2, $3, $4, NOW())
+          INSERT INTO files (filename, user_id, size, type, s3_key, uploaded_at)
+          VALUES ($1, $2, $3, $4, $5, NOW())
           RETURNING id
         `;
 
-        const result = await pool.query(query, [
+        const result = await getPool().query(query, [
           filename,
           userId,
           imageBuffer.length,
           "input",
+          null, // s3_key is null for external API downloads
         ]);
 
-        // Save file to disk
-        const uploadDir = path.join(process.cwd(), "data", "in");
-        await fs.mkdir(uploadDir, { recursive: true });
+        // Upload file to S3 (stateless)
+        const { S3Service } = await import("./s3Service.js");
+        const s3Key = S3Service.generateUserKey(`user_${userId}`, filename);
+        await S3Service.uploadFile(imageBuffer, s3Key, "image/jpeg");
 
-        const filePath = path.join(uploadDir, filename);
-        await fs.writeFile(filePath, imageBuffer);
+        // Update database with S3 key
+        const updateQuery = `
+          UPDATE s302.files 
+          SET s3_key = $1 
+          WHERE id = $2
+        `;
+        await getPool().query(updateQuery, [s3Key, result.rows[0].id]);
 
         return {
           success: true,
@@ -335,19 +342,13 @@ export class ExternalAPIService {
           filename: filename,
         };
       } catch (dbError) {
-        console.warn("Database not available, saving to disk only:", dbError);
-
-        // Save file to disk only
-        const uploadDir = path.join(process.cwd(), "data", "in");
-        await fs.mkdir(uploadDir, { recursive: true });
-
-        const filePath = path.join(uploadDir, filename);
-        await fs.writeFile(filePath, imageBuffer);
-
+        console.error(
+          "Database not available for stateless operation:",
+          dbError
+        );
         return {
-          success: true,
-          fileId: Date.now(),
-          filename: filename,
+          success: false,
+          error: "Database connection required for stateless file storage",
         };
       }
     } catch (error) {
@@ -362,7 +363,7 @@ export class ExternalAPIService {
   // Share processed image via email
   static async shareImageViaEmail(
     jobId: number,
-    userId: number,
+    userId: string,
     toEmail: string,
     subject: string = "Processed Image",
     message: string = "Here's your processed image!"
@@ -442,7 +443,7 @@ export class ExternalAPIService {
    */
   static async getProcessedImagePath(
     jobId: number,
-    userId: number
+    userId: string
   ): Promise<{
     success: boolean;
     filePath?: string;
@@ -458,7 +459,7 @@ export class ExternalAPIService {
         WHERE j.id = $1 AND f.user_id = $2
       `;
 
-      const jobResult = await pool.query(jobQuery, [jobId, userId]);
+      const jobResult = await getPool().query(jobQuery, [jobId, userId]);
 
       if (jobResult.rows.length === 0) {
         return {
@@ -523,7 +524,7 @@ export class ExternalAPIService {
   static async processRandomImage(
     searchTerm: string,
     processingOptions: any,
-    userId: number
+    userId: string
   ): Promise<{
     success: boolean;
     jobId?: number;
@@ -561,24 +562,31 @@ export class ExternalAPIService {
 
       // Save image to database
       const fileQuery = `
-        INSERT INTO files (filename, user_id, size, type, uploaded_at)
-        VALUES ($1, $2, $3, $4, NOW())
+        INSERT INTO files (filename, user_id, size, type, s3_key, uploaded_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
         RETURNING id
       `;
 
-      const fileResult = await pool.query(fileQuery, [
+      const fileResult = await getPool().query(fileQuery, [
         filename,
         userId,
         imageBuffer.length,
         "input",
+        null, // s3_key is null for external API downloads
       ]);
 
-      // Save file to disk
-      const uploadDir = path.join(process.cwd(), "data", "in");
-      await fs.mkdir(uploadDir, { recursive: true });
+      // Upload file to S3 (stateless)
+      const { S3Service } = await import("./s3Service.js");
+      const s3Key = S3Service.generateUserKey(`user_${userId}`, filename);
+      await S3Service.uploadFile(imageBuffer, s3Key, "image/jpeg");
 
-      const filePath = path.join(uploadDir, filename);
-      await fs.writeFile(filePath, imageBuffer);
+      // Update database with S3 key
+      const updateQuery = `
+        UPDATE s302.files 
+        SET s3_key = $1 
+        WHERE id = $2
+      `;
+      await getPool().query(updateQuery, [s3Key, fileResult.rows[0].id]);
 
       // Create processing job
       const jobQuery = `
@@ -587,7 +595,7 @@ export class ExternalAPIService {
         RETURNING id
       `;
 
-      const jobResult = await pool.query(jobQuery, [
+      const jobResult = await getPool().query(jobQuery, [
         filename,
         userId,
         "pending",
@@ -615,7 +623,7 @@ export class ExternalAPIService {
           );
 
           // Update job status to completed with output file info
-          await pool.query(
+          await getPool().query(
             "UPDATE jobs SET status = 'completed', completed_at = NOW(), result = $1 WHERE id = $2",
             [JSON.stringify({ outputFile: outputFilename }), jobId]
           );
@@ -623,7 +631,7 @@ export class ExternalAPIService {
           console.error("Background processing error:", error);
 
           // Update job status to failed
-          await pool.query(
+          await getPool().query(
             "UPDATE jobs SET status = 'failed', completed_at = NOW() WHERE id = $1",
             [jobId]
           );

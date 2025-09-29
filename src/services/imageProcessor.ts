@@ -46,12 +46,12 @@ export class ImageProcessor {
       console.log(`🖼️ Processing image: ${inputPath}`);
       console.log(`📊 Parameters:`, params);
 
-      // Load image from S3 or local file
+      // Load image from S3 (stateless)
       let imageBuffer: Buffer;
       if (params.inputS3Key) {
         imageBuffer = await S3Service.downloadFile(params.inputS3Key);
       } else {
-        imageBuffer = await fs.readFile(inputPath);
+        throw new Error("S3 key is required for stateless processing");
       }
 
       let pipeline = sharp(imageBuffer);
@@ -133,7 +133,7 @@ export class ImageProcessor {
       // Process the image
       const processedBuffer = await pipeline.toBuffer();
 
-      // Save to S3 or local file
+      // Save to S3 (stateless)
       if (params.outputS3Key) {
         await S3Service.uploadFile(
           processedBuffer,
@@ -148,12 +148,7 @@ export class ImageProcessor {
           outputFile: params.outputS3Key.split("/").pop()!,
         };
       } else {
-        await fs.writeFile(outputPath, processedBuffer);
-        console.log(`✅ Image processed successfully: ${outputPath}`);
-        return {
-          success: true,
-          outputFile: path.basename(outputPath),
-        };
+        throw new Error("S3 output key is required for stateless processing");
       }
     } catch (error) {
       console.error("❌ Image processing error:", error);
@@ -195,7 +190,12 @@ export class ImageProcessor {
     inputPath: string,
     outputPath: string,
     params: any
-  ): Promise<{ success: boolean; outputFile?: string; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    outputFile?: string;
+    error?: string;
+    frameUrls?: string[];
+  }> {
     try {
       console.log("🎬 Creating GIF animation...");
 
@@ -223,15 +223,19 @@ export class ImageProcessor {
       const outputDir = path.dirname(outputPath);
       const baseName = path.basename(outputPath, path.extname(outputPath));
 
+      // Upload frames to S3 and collect keys
+      const frameUrls: string[] = [];
       for (let i = 0; i < frames.length; i++) {
-        const framePath = path.join(outputDir, `${baseName}_frame_${i}.jpg`);
-        await fs.writeFile(framePath, frames[i]);
+        const frameKey = `processed/${baseName}_frame_${i}.jpg`;
+        await S3Service.uploadFile(frames[i], frameKey, "image/jpeg");
+        frameUrls.push(frameKey);
       }
 
       console.log(`✅ GIF animation frames created: ${frames.length} frames`);
       return {
         success: true,
-        outputFile: `${baseName}_frame_0.jpg`,
+        outputFile: frameUrls[0], // Return first frame URL
+        frameUrls, // Return all frame URLs
       };
     } catch (error) {
       console.error("❌ GIF creation error:", error);
@@ -249,7 +253,12 @@ export class ImageProcessor {
     inputPath: string,
     outputPath: string,
     params: any
-  ): Promise<{ success: boolean; outputFile?: string; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    outputFile?: string;
+    error?: string;
+    variationUrls?: string[];
+  }> {
     try {
       console.log("🎭 Creating stop-motion effect...");
 
@@ -277,12 +286,12 @@ export class ImageProcessor {
       const outputDir = path.dirname(outputPath);
       const baseName = path.basename(outputPath, path.extname(outputPath));
 
+      // Upload variations to S3 and collect keys
+      const variationUrls: string[] = [];
       for (let i = 0; i < variations.length; i++) {
-        const variationPath = path.join(
-          outputDir,
-          `${baseName}_stopmotion_${i}.jpg`
-        );
-        await fs.writeFile(variationPath, variations[i]);
+        const variationKey = `processed/${baseName}_stopmotion_${i}.jpg`;
+        await S3Service.uploadFile(variations[i], variationKey, "image/jpeg");
+        variationUrls.push(variationKey);
       }
 
       console.log(
@@ -290,7 +299,8 @@ export class ImageProcessor {
       );
       return {
         success: true,
-        outputFile: `${baseName}_stopmotion_0.jpg`,
+        outputFile: variationUrls[0], // Return first variation URL
+        variationUrls, // Return all variation URLs
       };
     } catch (error) {
       console.error("❌ Stop-motion creation error:", error);
@@ -311,7 +321,12 @@ export class ImageProcessor {
     inputPath: string,
     outputPath: string,
     params: any
-  ): Promise<{ success: boolean; outputFile?: string; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    outputFile?: string;
+    error?: string;
+    variationUrls?: string[];
+  }> {
     try {
       console.log("🎨 Generating image variations...");
 
@@ -340,12 +355,12 @@ export class ImageProcessor {
       const outputDir = path.dirname(outputPath);
       const baseName = path.basename(outputPath, path.extname(outputPath));
 
+      // Upload variations to S3 and collect keys
+      const variationUrls: string[] = [];
       for (let i = 0; i < variations.length; i++) {
-        const variationPath = path.join(
-          outputDir,
-          `${baseName}_variation_${i}.jpg`
-        );
-        await fs.writeFile(variationPath, variations[i]);
+        const variationKey = `processed/${baseName}_variation_${i}.jpg`;
+        await S3Service.uploadFile(variations[i], variationKey, "image/jpeg");
+        variationUrls.push(variationKey);
       }
 
       console.log(
@@ -353,7 +368,8 @@ export class ImageProcessor {
       );
       return {
         success: true,
-        outputFile: `${baseName}_variation_0.jpg`,
+        outputFile: variationUrls[0], // Return first variation URL
+        variationUrls, // Return all variation URLs
       };
     } catch (error) {
       console.error("❌ Variation generation error:", error);
@@ -374,17 +390,31 @@ export class ImageProcessor {
     inputPath: string,
     outputPath: string,
     params: any
-  ): Promise<{ success: boolean; outputFile?: string; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    outputFile?: string;
+    error?: string;
+    analysisUrls?: string[];
+  }> {
     try {
       console.log("🔍 Performing image analysis...");
+
+      // Load image from S3 (stateless)
+      let imageBuffer: Buffer;
+      if (params.inputS3Key) {
+        imageBuffer = await S3Service.downloadFile(params.inputS3Key);
+      } else {
+        throw new Error("S3 key is required for stateless processing");
+      }
 
       // CPU intensive analysis operations
       const analysisResults: any[] = [];
       const analysisCount = 30; // CPU intensive: 30 analysis passes
+      const analysisUrls: string[] = [];
 
       for (let i = 0; i < analysisCount; i++) {
         // Simulate complex image analysis
-        const image = sharp(inputPath);
+        const image = sharp(imageBuffer);
         const metadata = await image.metadata();
 
         // Perform multiple analysis passes
@@ -397,11 +427,12 @@ export class ImageProcessor {
           analysis,
           i
         );
-        const analysisPath = path.join(
-          path.dirname(outputPath),
-          `analysis_${i}_${path.basename(outputPath)}`
-        );
-        await analysisImage.toFile(analysisPath);
+
+        // Upload analysis image to S3 (stateless)
+        const analysisKey = `processed/analysis_${i}_${Date.now()}.jpg`;
+        const analysisBuffer = await analysisImage.toBuffer();
+        await S3Service.uploadFile(analysisBuffer, analysisKey, "image/jpeg");
+        analysisUrls.push(analysisKey);
       }
 
       console.log(
@@ -409,7 +440,8 @@ export class ImageProcessor {
       );
       return {
         success: true,
-        outputFile: `analysis_0_${path.basename(outputPath)}`,
+        outputFile: analysisUrls[0], // Return first analysis URL
+        analysisUrls, // Return all analysis URLs
       };
     } catch (error) {
       console.error("❌ Image analysis error:", error);
@@ -490,11 +522,10 @@ export class ImageProcessor {
   }
 
   /**
-   * Stress test method for CPU load testing
+   * Stress test method for CPU load testing (stateless)
    */
   static async stressTest(
-    inputPath: string,
-    outputDir: string,
+    inputS3Key: string,
     iterations: number
   ): Promise<{ success: boolean; processedFiles: number; error?: string }> {
     try {
@@ -504,11 +535,10 @@ export class ImageProcessor {
 
       for (let i = 0; i < iterations; i++) {
         try {
-          const outputFileName = `stress_test_${i}_${Date.now()}.jpg`;
-          const outputPath = path.join(outputDir, outputFileName);
+          const outputS3Key = `stress_test/stress_test_${i}_${Date.now()}.jpg`;
 
-          // Apply multiple CPU-intensive operations
-          await this.processImage(inputPath, outputPath, {
+          // Apply multiple CPU-intensive operations (stateless)
+          await this.processImage("", "", {
             format: "jpeg",
             quality: 100,
             width: 2048,
@@ -522,6 +552,8 @@ export class ImageProcessor {
             applyAdvancedFilters: true,
             generateVariations: true,
             performAnalysis: true,
+            inputS3Key: inputS3Key,
+            outputS3Key: outputS3Key,
           });
 
           processedFiles++;
@@ -593,17 +625,18 @@ export class ImageProcessor {
     return results;
   }
 
-  // Extract image metadata
-  static async extractMetadata(filePath: string): Promise<ImageMetadata> {
+  // Extract image metadata (stateless)
+  static async extractMetadata(s3Key: string): Promise<ImageMetadata> {
     try {
-      const metadata = await sharp(filePath).metadata();
-      const stats = await fs.stat(filePath);
+      // Download from S3 (stateless)
+      const imageBuffer = await S3Service.downloadFile(s3Key);
+      const metadata = await sharp(imageBuffer).metadata();
 
       return {
         format: metadata.format,
         width: metadata.width,
         height: metadata.height,
-        size: stats.size,
+        size: imageBuffer.length,
         density: metadata.density,
       };
     } catch (error) {
@@ -621,14 +654,14 @@ export class ImageProcessor {
     return supportedFormats.includes(format.toLowerCase());
   }
 
-  // Image validation
-  static async validateImage(filePath: string): Promise<{
+  // Image validation (stateless)
+  static async validateImage(s3Key: string): Promise<{
     valid: boolean;
     error?: string;
     metadata?: ImageMetadata;
   }> {
     try {
-      const metadata = await this.extractMetadata(filePath);
+      const metadata = await this.extractMetadata(s3Key);
 
       // Basic validation
       if (!metadata.width || !metadata.height) {

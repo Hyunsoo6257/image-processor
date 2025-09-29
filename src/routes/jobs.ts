@@ -1,6 +1,6 @@
 import express from "express";
 import { authenticateToken } from "../middleware/auth.js";
-import { pool } from "../models/database.js";
+import { getPool } from "../models/database.js";
 import { ImageProcessor } from "../services/imageProcessor.js";
 import { ExternalAPIService } from "../services/externalAPIService.js";
 import { S3Service } from "../services/s3Service.js";
@@ -14,7 +14,7 @@ const router = express.Router();
 // Get all jobs for the authenticated user
 router.get("/", authenticateToken, async (req, res) => {
   try {
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
@@ -22,23 +22,23 @@ router.get("/", authenticateToken, async (req, res) => {
     try {
       const query = `
         SELECT j.*, f.filename as input_filename
-        FROM jobs j
-        JOIN files f ON j.file_id = f.filename
+        FROM s302.jobs j
+        JOIN s302.files f ON j.file_id = f.filename
         WHERE f.user_id = $1
         ORDER BY j.created_at DESC
         LIMIT $2 OFFSET $3
       `;
 
-      const result = await pool.query(query, [userId, limit, offset]);
+      const result = await getPool().query(query, [userId, limit, offset]);
 
       // Get total count
       const countQuery = `
         SELECT COUNT(*) 
-        FROM jobs j
-        JOIN files f ON j.file_id = f.filename
+        FROM s302.jobs j
+        JOIN s302.files f ON j.file_id = f.filename
         WHERE f.user_id = $1
       `;
-      const countResult = await pool.query(countQuery, [userId]);
+      const countResult = await getPool().query(countQuery, [userId]);
 
       res.json({
         success: true,
@@ -103,16 +103,16 @@ router.get("/", authenticateToken, async (req, res) => {
 router.get("/:id", authenticateToken, async (req, res) => {
   try {
     const jobId = req.params.id;
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
 
     const query = `
       SELECT j.*, f.filename as input_filename
-      FROM jobs j
-      JOIN files f ON j.file_id = f.filename
+      FROM s302.jobs j
+      JOIN s302.files f ON j.file_id = f.filename
       WHERE j.id = $1 AND f.user_id = $2
     `;
 
-    const result = await pool.query(query, [jobId, userId]);
+    const result = await getPool().query(query, [jobId, userId]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -137,7 +137,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
 // Create a new job
 router.post("/", authenticateToken, async (req, res) => {
   try {
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
     const { fileId, params } = req.body;
 
     if (!fileId) {
@@ -149,8 +149,8 @@ router.post("/", authenticateToken, async (req, res) => {
 
     // Check if user owns this file
     const fileQuery =
-      "SELECT * FROM files WHERE filename = $1 AND user_id = $2";
-    const fileResult = await pool.query(fileQuery, [fileId, userId]);
+      "SELECT * FROM s302.files WHERE filename = $1 AND user_id = $2";
+    const fileResult = await getPool().query(fileQuery, [fileId, userId]);
 
     if (fileResult.rows.length === 0) {
       return res.status(404).json({
@@ -161,12 +161,12 @@ router.post("/", authenticateToken, async (req, res) => {
 
     // Create job
     const jobQuery = `
-      INSERT INTO jobs (file_id, user_id, status, created_at, params)
+      INSERT INTO s302.jobs (file_id, user_id, status, created_at, params)
       VALUES ($1, $2, $3, NOW(), $4)
       RETURNING id
     `;
 
-    const jobResult = await pool.query(jobQuery, [
+    const jobResult = await getPool().query(jobQuery, [
       fileId,
       userId,
       "pending",
@@ -190,7 +190,7 @@ router.post("/", authenticateToken, async (req, res) => {
         // Generate S3 keys
         const inputS3Key = `user_${userId}/${fileId}`;
         const outputS3Key = S3Service.generateProcessedKey(
-          userId,
+          req.user!.username,
           jobId,
           outputFilename
         );
@@ -202,8 +202,8 @@ router.post("/", authenticateToken, async (req, res) => {
         });
 
         // Update job status to completed with output file info
-        await pool.query(
-          "UPDATE jobs SET status = 'completed', completed_at = NOW(), result = $1 WHERE id = $2",
+        await getPool().query(
+          "UPDATE s302.jobs SET status = 'completed', completed_at = NOW(), result = $1 WHERE id = $2",
           [
             JSON.stringify({ outputFile: outputFilename, s3Key: outputS3Key }),
             jobId,
@@ -213,8 +213,8 @@ router.post("/", authenticateToken, async (req, res) => {
         console.error("Background processing error:", error);
 
         // Update job status to failed
-        await pool.query(
-          "UPDATE jobs SET status = 'failed', completed_at = NOW() WHERE id = $1",
+        await getPool().query(
+          "UPDATE s302.jobs SET status = 'failed', completed_at = NOW() WHERE id = $1",
           [jobId]
         );
       }
@@ -240,7 +240,7 @@ router.post("/", authenticateToken, async (req, res) => {
 // Batch process multiple files
 router.post("/batch-process", authenticateToken, async (req, res) => {
   try {
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
     const { fileIds, params } = req.body;
 
     if (!fileIds || !Array.isArray(fileIds) || fileIds.length === 0) {
@@ -342,7 +342,7 @@ router.post("/batch-process", authenticateToken, async (req, res) => {
     // Deduct credits for non-admin users
     if (req.user!.role !== "admin") {
       try {
-        await pool.query(
+        await getPool().query(
           "UPDATE user_credits SET credits = credits - $1, last_updated = CURRENT_TIMESTAMP WHERE username = $2",
           [successfulJobs.length, req.user!.username]
         );
@@ -385,7 +385,7 @@ router.post("/batch-process", authenticateToken, async (req, res) => {
 router.post("/share-image", authenticateToken, async (req, res) => {
   try {
     const { jobId, toEmail, subject, message } = req.body;
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
 
     if (!jobId) {
       return res.status(400).json({
@@ -403,7 +403,7 @@ router.post("/share-image", authenticateToken, async (req, res) => {
 
     const result = await ExternalAPIService.shareImageViaEmail(
       jobId,
-      userId,
+      userId, // userId is already a number
       toEmail,
       subject,
       message
@@ -437,11 +437,11 @@ router.get(
   async (req, res) => {
     try {
       const { jobId } = req.params;
-      const userId = req.user!.id;
+      const userId = req.user!.id; // Use string ID directly (Cognito UUID)
 
       const result = await ExternalAPIService.getProcessedImagePath(
         parseInt(jobId),
-        userId
+        userId // userId is already a number
       );
 
       if (result.success && result.filePath && result.filename) {
@@ -466,7 +466,7 @@ router.get(
 router.post("/process-random-image", authenticateToken, async (req, res) => {
   try {
     const { searchTerm, processingOptions } = req.body;
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
 
     if (!searchTerm) {
       return res.status(400).json({
@@ -478,7 +478,7 @@ router.post("/process-random-image", authenticateToken, async (req, res) => {
     const result = await ExternalAPIService.processRandomImage(
       searchTerm,
       processingOptions,
-      userId
+      userId // userId is already a number
     );
 
     if (result.success) {
@@ -507,7 +507,7 @@ router.post("/process-random-image", authenticateToken, async (req, res) => {
 router.delete("/:id", authenticateToken, async (req, res) => {
   try {
     const jobId = parseInt(req.params.id);
-    const userId = req.user!.id;
+    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
 
     if (isNaN(jobId)) {
       return res.status(400).json({
@@ -518,8 +518,8 @@ router.delete("/:id", authenticateToken, async (req, res) => {
 
     try {
       // Check if user owns this job (database mode)
-      const query = "SELECT * FROM jobs WHERE id = $1 AND user_id = $2";
-      const result = await pool.query(query, [jobId, userId]);
+      const query = "SELECT * FROM s302.jobs WHERE id = $1 AND user_id = $2";
+      const result = await getPool().query(query, [jobId, userId]);
 
       if (result.rows.length === 0) {
         return res.status(404).json({
@@ -531,20 +531,17 @@ router.delete("/:id", authenticateToken, async (req, res) => {
       const job = result.rows[0];
 
       // Delete job from database
-      await pool.query("DELETE FROM jobs WHERE id = $1 AND user_id = $2", [
-        jobId,
-        userId,
-      ]);
+      await getPool().query(
+        "DELETE FROM s302.jobs WHERE id = $1 AND user_id = $2",
+        [jobId, userId]
+      );
 
-      // Delete related output file if exists
-      if (job.result && job.result.outputFile) {
-        const outputPath = path.join(
-          __dirname,
-          "../../data/out",
-          job.result.outputFile
-        );
-        if (fs.existsSync(outputPath)) {
-          fs.unlinkSync(outputPath);
+      // Delete related output file from S3 if exists (stateless)
+      if (job.result && job.result.s3Key) {
+        try {
+          await S3Service.deleteFile(job.result.s3Key);
+        } catch (error) {
+          console.warn("Failed to delete S3 file:", error);
         }
       }
     } catch (dbError) {

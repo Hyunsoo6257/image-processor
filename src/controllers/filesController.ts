@@ -8,6 +8,7 @@ import {
 } from "../types/index.js";
 import { ImageProcessor } from "../services/imageProcessor.js";
 import { S3Service } from "../services/s3Service.js";
+import { getPool } from "../models/database.js";
 import { saveImageMetadata } from "../models/images.js";
 import { listJobsByUser } from "../models/jobs.js";
 
@@ -54,7 +55,7 @@ export async function handleUpload(req: Request, res: Response): Promise<void> {
     try {
       // Generate S3 key for metadata
       const s3Key = S3Service.generateUserKey(
-        req.user.id,
+        req.user.username,
         req.file.originalname
       );
 
@@ -100,8 +101,8 @@ export async function handleUpload(req: Request, res: Response): Promise<void> {
   }
 }
 
-// Download processed files
-export function downloadFile(req: Request, res: Response): void {
+// Download files from S3 (stateless)
+export async function downloadFile(req: Request, res: Response): Promise<void> {
   try {
     const { filename } = req.params;
 
@@ -126,29 +127,27 @@ export function downloadFile(req: Request, res: Response): void {
       return;
     }
 
-    const filePath = path.join("./data/out", filename);
+    try {
+      // Get file from S3
+      const fileBuffer = await S3Service.downloadFile(filename);
 
-    // check if the file exists
-    if (!fs.existsSync(filePath)) {
+      // Set appropriate headers
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`
+      );
+      res.setHeader("Content-Length", fileBuffer.length);
+
+      // Send file buffer
+      res.send(fileBuffer);
+    } catch (s3Error) {
+      console.error("S3 download error:", s3Error);
       res.status(404).json({
-        error: "File not found",
+        error: "File not found in S3",
         success: false,
       });
-      return;
     }
-
-    // download file
-    res.download(filePath, (err) => {
-      if (err) {
-        console.error("File download error:", err);
-        if (!res.headersSent) {
-          res.status(500).json({
-            error: "Download failed",
-            success: false,
-          });
-        }
-      }
-    });
   } catch (error) {
     console.error("Download error:", error);
     res.status(500).json({
@@ -158,7 +157,7 @@ export function downloadFile(req: Request, res: Response): void {
   }
 }
 
-// Get file metadata
+// Get file metadata from S3 (stateless)
 export async function getFileMetadata(
   req: Request,
   res: Response
@@ -174,22 +173,32 @@ export async function getFileMetadata(
       return;
     }
 
-    const filePath = path.join("./data/in", fileId);
+    try {
+      // Get file from S3
+      const fileBuffer = await S3Service.downloadFile(fileId);
 
-    if (!fs.existsSync(filePath)) {
+      // Extract metadata from buffer (temporary file approach for statelessness)
+      const tempPath = `/tmp/${Date.now()}-${fileId}`;
+      await fs.promises.writeFile(tempPath, fileBuffer);
+
+      try {
+        const metadata = await ImageProcessor.extractMetadata(tempPath);
+
+        res.json({
+          success: true,
+          data: metadata,
+        });
+      } finally {
+        // Clean up temporary file
+        await fs.promises.unlink(tempPath).catch(() => {});
+      }
+    } catch (s3Error) {
+      console.error("S3 metadata error:", s3Error);
       res.status(404).json({
-        error: "File not found",
+        error: "File not found in S3",
         success: false,
       });
-      return;
     }
-
-    const metadata = await ImageProcessor.extractMetadata(filePath);
-
-    res.json({
-      success: true,
-      data: metadata,
-    });
   } catch (error) {
     console.error("Get metadata error:", error);
     res.status(500).json({
@@ -199,7 +208,7 @@ export async function getFileMetadata(
   }
 }
 
-// List uploaded files (user's own files or all files for admin)
+// List uploaded files from database (S3-based, stateless)
 export async function listFiles(req: Request, res: Response): Promise<void> {
   try {
     if (!req.user) {
@@ -210,66 +219,46 @@ export async function listFiles(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const inputDir = "./data/in";
-    const outputDir = "./data/out";
+    const userId = req.user.id; // Use string ID directly (Cognito UUID)
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const offset = (page - 1) * limit;
 
-    const [inputFiles, outputFiles] = await Promise.all([
-      fs.promises.readdir(inputDir).catch(() => []),
-      fs.promises.readdir(outputDir).catch(() => []),
-    ]);
+    try {
+      // Get files from database (S3-based)
+      const query = `
+        SELECT * FROM s302.files 
+        WHERE user_id = $1 
+        ORDER BY uploaded_at DESC 
+        LIMIT $2 OFFSET $3
+      `;
 
-    // Filter input files for non-admin users to show only their own uploads
-    let visibleInputFiles = inputFiles;
-    if (req.user.role !== "admin") {
-      const allowed = new Set<string>();
+      const result = await getPool().query(query, [userId, limit, offset]);
 
-      // From in-memory registry
-      for (const filename of inputFiles) {
-        if (uploadRegistry.get(filename) === req.user.username) {
-          allowed.add(filename);
-        }
-      }
+      // Get total count
+      const countQuery = "SELECT COUNT(*) FROM s302.files WHERE user_id = $1";
+      const countResult = await getPool().query(countQuery, [userId]);
 
-      // Also allow files referenced by this user's jobs (they may have processed files in this session)
-      try {
-        const jobs = listJobsByUser(req.user as unknown as AuthenticatedUser);
-        for (const j of jobs) {
-          allowed.add(j.file_id);
-        }
-      } catch {}
-
-      visibleInputFiles = inputFiles.filter((f) => allowed.has(f));
+      res.json({
+        success: true,
+        data: {
+          files: result.rows,
+          pagination: {
+            page,
+            limit,
+            total: parseInt(countResult.rows[0].count),
+            totalPages: Math.ceil(parseInt(countResult.rows[0].count) / limit),
+          },
+        },
+      });
+    } catch (dbError) {
+      console.error("Database connection failed:", dbError);
+      res.status(500).json({
+        success: false,
+        error:
+          "Database connection required - no local fallback for statelessness",
+      });
     }
-
-    // collect file information
-    const fileList = await Promise.all([
-      ...visibleInputFiles.map(async (filename) => {
-        try {
-          const filePath = path.join(inputDir, filename);
-          const stats = await fs.promises.stat(filePath);
-          return {
-            filename,
-            type: "input",
-            size: stats.size,
-            uploadedAt: stats.birthtime,
-            path: filePath,
-          };
-        } catch {
-          return null;
-        }
-      }),
-      // Output files are not displayed directly in the UI list anymore, so skip adding them as rows
-    ]);
-
-    const validFiles = fileList.filter((file) => file !== null);
-
-    res.json({
-      success: true,
-      data: {
-        total: validFiles.length,
-        files: validFiles,
-      },
-    });
   } catch (error) {
     console.error("List files error:", error);
     res.status(500).json({

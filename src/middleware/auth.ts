@@ -6,7 +6,7 @@ import { AuthenticatedUser } from "../types/index.js";
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret"; // replace with a better secret before shipping
 
 interface JWTPayload {
-  id: number;
+  id: string;  // Changed from number to string for Cognito
   username: string;
   role: "admin" | "user";
   iat?: number;
@@ -34,7 +34,7 @@ export function authenticateToken(
       id: payload.id,
       username: payload.username,
       role: payload.role,
-    } as AuthenticatedUser;
+    };
 
     next();
   } catch (error) {
@@ -83,9 +83,10 @@ export function optionalAuth(
     try {
       const payload = jwt.verify(token, JWT_SECRET) as JWTPayload;
       req.user = {
+        id: payload.id,
         username: payload.username,
         role: payload.role,
-      } as AuthenticatedUser;
+      };
     } catch (error) {
       // Ignore invalid tokens in optional auth
     }

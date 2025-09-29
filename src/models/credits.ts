@@ -1,4 +1,4 @@
-import { pool, withTransaction } from "./database.js";
+import { getPool, withTransaction } from "./database.js";
 
 // ===================================
 // Credit System (ACID Requirements)
@@ -8,7 +8,7 @@ import { pool, withTransaction } from "./database.js";
  * Initialize credit system tables
  */
 export async function initializeCreditSystem(): Promise<void> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     // Create user credits table
     await client.query(`
@@ -47,6 +47,31 @@ export async function initializeCreditSystem(): Promise<void> {
 }
 
 /**
+ * Create user credits (for new users)
+ */
+export async function createUserCredits(
+  username: string,
+  role: string = "user"
+): Promise<void> {
+  const client = await getPool().connect();
+  try {
+    // Set initial credits based on role
+    const initialCredits = role === "admin" ? 999999 : 10;
+
+    await client.query(
+      "INSERT INTO user_credits (username, credits) VALUES ($1, $2) ON CONFLICT (username) DO NOTHING",
+      [username, initialCredits]
+    );
+
+    console.log(
+      `✅ User ${username} credits initialized with ${initialCredits} credits`
+    );
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Get user credits
  */
 export async function getUserCredits(username: string): Promise<{
@@ -54,7 +79,7 @@ export async function getUserCredits(username: string): Promise<{
   credits: number;
   lastUpdated: Date;
 } | null> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     const query =
       "SELECT username, credits, last_updated FROM user_credits WHERE username = $1";
@@ -164,7 +189,7 @@ export async function getAllUsersWithCredits(): Promise<
     totalTransactions: number;
   }[]
 > {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     const query = `
       SELECT 
@@ -197,7 +222,7 @@ export async function getUserTransactionHistory(username: string): Promise<
     createdAt: Date;
   }[]
 > {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     const query = `
       SELECT id, job_id, credits_used, transaction_type, description, created_at

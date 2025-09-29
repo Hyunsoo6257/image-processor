@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Image Processor</title>
+    <!-- QR Code Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.4.4/qrcode.min.js"></script>
     <style>
       * {
         margin: 0;
@@ -381,6 +383,75 @@
         border-color: #333333;
       }
 
+      /* Modal Styles */
+      .modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+      }
+
+      .modal-content {
+        background: #ffffff;
+        border: 2px solid #000000;
+        padding: 30px;
+        max-width: 400px;
+        width: 90%;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      /* Google Login Button */
+      .btn-google {
+        background: #ffffff;
+        border: 1px solid #000000;
+        color: #000000;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .btn-google:hover {
+        background: #f5f5f5;
+        border-color: #333333;
+      }
+
+      /* MFA QR Code Container */
+      .mfa-qr-container {
+        text-align: center;
+        padding: 20px;
+        border: 1px solid #000000;
+        background: #ffffff;
+        margin: 20px 0;
+      }
+
+      .mfa-qr-code {
+        width: 200px;
+        height: 200px;
+        border: 1px solid #000000;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f9f9f9;
+        color: #666;
+        font-size: 14px;
+      }
+
+      /* Alert Info Style */
+      .alert-info {
+        background: #f5f5f5;
+        border: 1px solid #000000;
+        color: #000000;
+        padding: 15px;
+        margin: 15px 0;
+      }
+
       .selected-image-section {
         margin-top: 15px;
       }
@@ -520,11 +591,11 @@
             style="display: flex; gap: 10px; align-items: center"
           >
             <input
-              type="text"
-              id="username"
-              placeholder="Username"
+              type="email"
+              id="email"
+              placeholder="Email"
               class="form-input"
-              style="width: 120px"
+              style="width: 140px"
               required
             />
             <input
@@ -537,6 +608,29 @@
             />
             <button type="submit" class="btn btn-primary">Login</button>
           </form>
+          <div
+            style="
+              margin-top: 10px;
+              display: flex;
+              gap: 5px;
+              align-items: center;
+            "
+          >
+            <button
+              id="register-btn"
+              class="btn"
+              style="font-size: 12px; padding: 4px 8px"
+            >
+              Register
+            </button>
+            <button
+              id="google-login-btn"
+              class="btn btn-google"
+              style="font-size: 12px; padding: 4px 8px"
+            >
+              <span style="margin-right: 5px">🔍</span>Google
+            </button>
+          </div>
         </div>
 
         <!-- Navigation and User Info (shown when logged in) -->
@@ -836,6 +930,299 @@
 
       <!-- Alerts -->
       <div id="alerts"></div>
+
+      <!-- Register Modal -->
+      <div id="register-modal" class="modal hidden">
+        <div class="modal-content">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 20px;
+            "
+          >
+            <h3>Create Account</h3>
+            <button
+              id="close-register-modal"
+              style="
+                background: none;
+                border: none;
+                font-size: 20px;
+                cursor: pointer;
+              "
+            >
+              &times;
+            </button>
+          </div>
+          <form id="register-form">
+            <div class="form-group">
+              <label class="form-label">Email</label>
+              <input
+                type="email"
+                id="register-email"
+                class="form-input"
+                placeholder="Enter your email"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Password</label>
+              <input
+                type="password"
+                id="register-password"
+                class="form-input"
+                placeholder="Enter your password"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Full Name</label>
+              <input
+                type="text"
+                id="register-name"
+                class="form-input"
+                placeholder="Enter your full name"
+                required
+              />
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 20px">
+              <button type="submit" class="btn btn-primary" style="flex: 1">
+                Register
+              </button>
+              <button type="button" id="cancel-register" class="btn">
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- MFA Setup Modal -->
+      <div id="mfa-setup-modal" class="modal hidden">
+        <div class="modal-content">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 20px;
+            "
+          >
+            <h3>Setup Two-Factor Authentication</h3>
+            <button
+              id="close-mfa-setup-modal"
+              style="
+                background: none;
+                border: none;
+                font-size: 20px;
+                cursor: pointer;
+              "
+            >
+              &times;
+            </button>
+          </div>
+          <div class="mfa-qr-container">
+            <div id="mfa-qr-code" class="mfa-qr-code"></div>
+            <p style="margin-top: 15px; font-size: 14px; color: #666">
+              Scan this QR code with your authenticator app (Google
+              Authenticator, Authy, etc.)
+            </p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Verification Code</label>
+            <input
+              type="text"
+              id="mfa-verification-code"
+              class="form-input"
+              placeholder="Enter 6-digit code"
+              maxlength="6"
+            />
+          </div>
+          <div style="display: flex; gap: 10px; margin-top: 20px">
+            <button id="verify-mfa-btn" class="btn btn-primary" style="flex: 1">
+              Verify & Enable
+            </button>
+            <button type="button" id="cancel-mfa-setup" class="btn">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MFA Login Modal -->
+      <div id="mfa-login-modal" class="modal hidden">
+        <div class="modal-content">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 20px;
+            "
+          >
+            <h3>Two-Factor Authentication</h3>
+            <button
+              id="close-mfa-login-modal"
+              style="
+                background: none;
+                border: none;
+                font-size: 20px;
+                cursor: pointer;
+              "
+            >
+              &times;
+            </button>
+          </div>
+          <p style="margin-bottom: 20px; color: #666">
+            Enter the 6-digit code from your authenticator app
+          </p>
+          <div class="form-group">
+            <label class="form-label">Verification Code</label>
+            <input
+              type="text"
+              id="mfa-login-code"
+              class="form-input"
+              placeholder="000000"
+              maxlength="6"
+              style="text-align: center; font-size: 18px; letter-spacing: 2px"
+            />
+          </div>
+          <div style="display: flex; gap: 10px; margin-top: 20px">
+            <button id="mfa-login-btn" class="btn btn-primary" style="flex: 1">
+              Verify
+            </button>
+            <button type="button" id="cancel-mfa-login" class="btn">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Email Verification Modal -->
+      <div id="email-verification-modal" class="modal hidden">
+        <div class="modal-content">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 20px;
+            "
+          >
+            <h3>Verify Your Email</h3>
+            <button
+              id="close-email-verification-modal"
+              style="
+                background: none;
+                border: none;
+                font-size: 20px;
+                cursor: pointer;
+              "
+            >
+              &times;
+            </button>
+          </div>
+          <p style="margin-bottom: 20px; color: #666">
+            We've sent a verification code to your email address. Please enter
+            the code below to complete your registration.
+          </p>
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input
+              type="email"
+              id="verification-email"
+              class="form-input"
+              placeholder="Enter your email"
+              readonly
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Verification Code</label>
+            <input
+              type="text"
+              id="verification-code"
+              class="form-input"
+              placeholder="Enter 6-digit code"
+              maxlength="6"
+            />
+          </div>
+          <div style="display: flex; gap: 10px; margin-top: 20px">
+            <button
+              id="verify-email-btn"
+              class="btn btn-primary"
+              style="flex: 1"
+            >
+              Verify Email
+            </button>
+            <button type="button" id="cancel-email-verification" class="btn">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- New Password Modal -->
+      <div id="new-password-modal" class="modal hidden">
+        <div class="modal-content">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 20px;
+            "
+          >
+            <h3>Set New Password</h3>
+            <button
+              id="close-new-password-modal"
+              style="
+                background: none;
+                border: none;
+                font-size: 20px;
+                cursor: pointer;
+              "
+            >
+              &times;
+            </button>
+          </div>
+          <p style="margin-bottom: 20px; color: #666">
+            Please set a new password for your account
+          </p>
+          <div class="form-group">
+            <label class="form-label">New Password</label>
+            <input
+              type="password"
+              id="new-password"
+              class="form-input"
+              placeholder="Enter new password"
+              minlength="8"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Confirm New Password</label>
+            <input
+              type="password"
+              id="confirm-new-password"
+              class="form-input"
+              placeholder="Confirm new password"
+              minlength="8"
+            />
+          </div>
+          <div style="display: flex; gap: 10px; margin-top: 20px">
+            <button
+              id="set-new-password-btn"
+              class="btn btn-primary"
+              style="flex: 1"
+            >
+              Set Password
+            </button>
+            <button type="button" id="cancel-new-password" class="btn">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script type="module" src="app.js"></script>

@@ -1,32 +1,118 @@
 import { Pool, PoolConfig } from "pg";
 
 // PostgreSQL connection configuration
-const dbConfig: PoolConfig = {
-  host: process.env.DB_HOST || "localhost",
-  user: process.env.DB_USER || "postgres",
-  password: process.env.DB_PASSWORD || "password",
-  database: process.env.DB_NAME || "image_processor",
-  port: parseInt(process.env.DB_PORT || "5432"),
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-  ssl:
-    process.env.DB_SSL === "require"
-      ? {
-          rejectUnauthorized:
-            process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
-        }
-      : undefined,
-};
+function getDbConfig(): PoolConfig {
+  return {
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "postgres",
+    password: process.env.DB_PASSWORD || "password",
+    database: process.env.DB_NAME || "image_processor",
+    port: parseInt(process.env.DB_PORT || "5432"),
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000,
+    // Set default schema
+    options: "-c search_path=s302,public",
+    ssl:
+      process.env.DB_SSL === "require"
+        ? {
+            rejectUnauthorized:
+              process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
+          }
+        : undefined,
+  };
+}
 
-// Create connection pool
-export const pool = new Pool(dbConfig);
+// Create connection pool (lazy initialization)
+let pool: Pool | null = null;
+
+export function getPool(): Pool {
+  if (!pool) {
+    pool = new Pool(getDbConfig());
+  }
+  return pool;
+}
+
+// Migrate user_id columns from INTEGER to VARCHAR for Cognito UUID support
+async function migrateUserIdToVarchar(client: any): Promise<void> {
+  try {
+    // Check if jobs table exists and has INTEGER user_id
+    const jobsCheck = await client.query(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_schema = 's302' 
+      AND table_name = 'jobs' 
+      AND column_name = 'user_id'
+    `);
+
+    if (jobsCheck.rows.length > 0 && jobsCheck.rows[0].data_type === 'integer') {
+      console.log("🔄 Migrating jobs.user_id from INTEGER to VARCHAR...");
+      
+      // Drop existing data (since we can't convert INTEGER to VARCHAR with existing data)
+      await client.query("DELETE FROM s302.jobs");
+      
+      // Alter column type
+      await client.query("ALTER TABLE s302.jobs ALTER COLUMN user_id TYPE VARCHAR(255)");
+      console.log("✅ jobs.user_id migrated to VARCHAR");
+    }
+
+    // Check if files table exists and has INTEGER user_id
+    const filesCheck = await client.query(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_schema = 's302' 
+      AND table_name = 'files' 
+      AND column_name = 'user_id'
+    `);
+
+    if (filesCheck.rows.length > 0 && filesCheck.rows[0].data_type === 'integer') {
+      console.log("🔄 Migrating files.user_id from INTEGER to VARCHAR...");
+      
+      // Drop existing data (since we can't convert INTEGER to VARCHAR with existing data)
+      await client.query("DELETE FROM s302.files");
+      
+      // Alter column type
+      await client.query("ALTER TABLE s302.files ALTER COLUMN user_id TYPE VARCHAR(255)");
+      console.log("✅ files.user_id migrated to VARCHAR");
+    }
+
+    // Check if processing_history table exists and has INTEGER user_id
+    const historyCheck = await client.query(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_schema = 's302' 
+      AND table_name = 'processing_history' 
+      AND column_name = 'user'
+    `);
+
+    if (historyCheck.rows.length > 0 && historyCheck.rows[0].data_type === 'integer') {
+      console.log("🔄 Migrating processing_history.user from INTEGER to VARCHAR...");
+      
+      // Drop existing data
+      await client.query("DELETE FROM s302.processing_history");
+      
+      // Alter column type
+      await client.query("ALTER TABLE s302.processing_history ALTER COLUMN \"user\" TYPE VARCHAR(255)");
+      console.log("✅ processing_history.user migrated to VARCHAR");
+    }
+
+  } catch (error) {
+    console.error("Error during user_id migration:", error);
+    // Don't throw - let the application continue
+  }
+}
 
 // Initialize database (create tables)
 export async function initializeDatabase(): Promise<void> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
 
   try {
+    // Create schema if not exists
+    await client.query("CREATE SCHEMA IF NOT EXISTS s302");
+
+    // Migrate existing tables to support Cognito UUID user_id
+    await migrateUserIdToVarchar(client);
+
     // Create ENUM types
     await client.query(`
       DO $$ BEGIN
@@ -62,9 +148,9 @@ export async function initializeDatabase(): Promise<void> {
 
     // 1. Jobs table
     await client.query(`
-      CREATE TABLE IF NOT EXISTS jobs (
+      CREATE TABLE IF NOT EXISTS s302.jobs (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL,
+        user_id VARCHAR(255) NOT NULL, -- Changed to VARCHAR for Cognito UUID
         file_id VARCHAR(255) NOT NULL,
         params JSONB,
         status job_status DEFAULT 'pending',
@@ -76,31 +162,32 @@ export async function initializeDatabase(): Promise<void> {
 
     // Create indexes
     await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs (user_id);
-      CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs (status);
-      CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs (created_at);
+      CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON s302.jobs (user_id);
+      CREATE INDEX IF NOT EXISTS idx_jobs_status ON s302.jobs (status);
+      CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON s302.jobs (created_at);
     `);
 
     // 2. Files table
     await client.query(`
-      CREATE TABLE IF NOT EXISTS files (
+      CREATE TABLE IF NOT EXISTS s302.files (
         id SERIAL PRIMARY KEY,
         filename VARCHAR(255) UNIQUE NOT NULL,
-        user_id INTEGER NOT NULL,
+        user_id VARCHAR(255) NOT NULL, -- Changed to VARCHAR for Cognito UUID
         size BIGINT NOT NULL,
         type VARCHAR(50) NOT NULL,
+        s3_key VARCHAR(255),
         uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_files_user_id ON files (user_id);
-      CREATE INDEX IF NOT EXISTS idx_files_uploaded_at ON files (uploaded_at);
+      CREATE INDEX IF NOT EXISTS idx_files_user_id ON s302.files (user_id);
+      CREATE INDEX IF NOT EXISTS idx_files_uploaded_at ON s302.files (uploaded_at);
     `);
 
     // 3. Image metadata table
     await client.query(`
-      CREATE TABLE IF NOT EXISTS image_metadata (
+      CREATE TABLE IF NOT EXISTS s302.image_metadata (
         id SERIAL PRIMARY KEY,
         file_id VARCHAR(255) UNIQUE NOT NULL,
         original_name VARCHAR(255) NOT NULL,
@@ -116,13 +203,13 @@ export async function initializeDatabase(): Promise<void> {
     `);
 
     await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_image_metadata_uploaded_by ON image_metadata (uploaded_by);
-      CREATE INDEX IF NOT EXISTS idx_image_metadata_file_id ON image_metadata (file_id);
+      CREATE INDEX IF NOT EXISTS idx_image_metadata_uploaded_by ON s302.image_metadata (uploaded_by);
+      CREATE INDEX IF NOT EXISTS idx_image_metadata_file_id ON s302.image_metadata (file_id);
     `);
 
     // 4. User preferences table
     await client.query(`
-      CREATE TABLE IF NOT EXISTS user_preferences (
+      CREATE TABLE IF NOT EXISTS s302.user_preferences (
         id SERIAL PRIMARY KEY,
         username VARCHAR(50) UNIQUE NOT NULL,
         default_format image_format DEFAULT 'jpeg',
@@ -140,9 +227,9 @@ export async function initializeDatabase(): Promise<void> {
 
     // 5. Processing history table
     await client.query(`
-      CREATE TABLE IF NOT EXISTS processing_history (
+      CREATE TABLE IF NOT EXISTS s302.processing_history (
         id SERIAL PRIMARY KEY,
-        job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        job_id INTEGER NOT NULL REFERENCES s302.jobs(id) ON DELETE CASCADE,
         "user" VARCHAR(50) NOT NULL,
         input_file_id VARCHAR(255) NOT NULL,
         output_file_id VARCHAR(255),
@@ -156,14 +243,14 @@ export async function initializeDatabase(): Promise<void> {
     `);
 
     await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_processing_history_user ON processing_history ("user");
-      CREATE INDEX IF NOT EXISTS idx_processing_history_processed_at ON processing_history (processed_at);
-      CREATE INDEX IF NOT EXISTS idx_processing_history_success ON processing_history (success);
+      CREATE INDEX IF NOT EXISTS idx_processing_history_user ON s302.processing_history ("user");
+      CREATE INDEX IF NOT EXISTS idx_processing_history_processed_at ON s302.processing_history (processed_at);
+      CREATE INDEX IF NOT EXISTS idx_processing_history_success ON s302.processing_history (success);
     `);
 
     // 6. System statistics table
     await client.query(`
-      CREATE TABLE IF NOT EXISTS system_stats (
+      CREATE TABLE IF NOT EXISTS s302.system_stats (
         id SERIAL PRIMARY KEY,
         metric_name VARCHAR(100) NOT NULL,
         metric_value DECIMAL(10,2) NOT NULL,
@@ -173,8 +260,8 @@ export async function initializeDatabase(): Promise<void> {
     `);
 
     await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_system_stats_metric_name ON system_stats (metric_name);
-      CREATE INDEX IF NOT EXISTS idx_system_stats_recorded_at ON system_stats (recorded_at);
+      CREATE INDEX IF NOT EXISTS idx_system_stats_metric_name ON s302.system_stats (metric_name);
+      CREATE INDEX IF NOT EXISTS idx_system_stats_recorded_at ON s302.system_stats (recorded_at);
     `);
 
     // Create trigger function (automatic updated_at update)
@@ -190,14 +277,14 @@ export async function initializeDatabase(): Promise<void> {
 
     // Apply triggers
     await client.query(`
-      DROP TRIGGER IF EXISTS update_jobs_updated_at ON jobs;
+      DROP TRIGGER IF EXISTS update_jobs_updated_at ON s302.jobs;
       CREATE TRIGGER update_jobs_updated_at 
-        BEFORE UPDATE ON jobs 
+        BEFORE UPDATE ON s302.jobs 
         FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
         
-      DROP TRIGGER IF EXISTS update_user_preferences_updated_at ON user_preferences;
+      DROP TRIGGER IF EXISTS update_user_preferences_updated_at ON s302.user_preferences;
       CREATE TRIGGER update_user_preferences_updated_at 
-        BEFORE UPDATE ON user_preferences 
+        BEFORE UPDATE ON s302.user_preferences 
         FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
     `);
 
@@ -222,14 +309,14 @@ async function insertDefaultUserPreferences(client: any): Promise<void> {
   try {
     // Default settings for admin user
     await client.query(`
-      INSERT INTO user_preferences (username, default_format, default_quality, default_enhance, notifications_enabled) 
+      INSERT INTO s302.user_preferences (username, default_format, default_quality, default_enhance, notifications_enabled) 
       VALUES ('admin', 'jpeg', 95, true, true)
       ON CONFLICT (username) DO NOTHING
     `);
 
     // Default settings for user1
     await client.query(`
-      INSERT INTO user_preferences (username, default_format, default_quality, default_enhance) 
+      INSERT INTO s302.user_preferences (username, default_format, default_quality, default_enhance) 
       VALUES ('user1', 'png', 80, false)
       ON CONFLICT (username) DO NOTHING
     `);
@@ -243,7 +330,7 @@ async function insertDefaultUserPreferences(client: any): Promise<void> {
 // Connection test
 export async function testConnection(): Promise<boolean> {
   try {
-    const client = await pool.connect();
+    const client = await getPool().connect();
     await client.query("SELECT 1");
     client.release();
     console.log("✅ PostgreSQL connection successful");
@@ -257,8 +344,11 @@ export async function testConnection(): Promise<boolean> {
 // Graceful shutdown
 export async function closeConnection(): Promise<void> {
   try {
-    await pool.end();
-    console.log("✅ PostgreSQL connection closed");
+    if (pool) {
+      await pool.end();
+      pool = null;
+      console.log("✅ PostgreSQL connection closed");
+    }
   } catch (error) {
     console.error("❌ Error closing PostgreSQL connection:", error);
   }
@@ -268,7 +358,7 @@ export async function closeConnection(): Promise<void> {
 export async function withTransaction<T>(
   callback: (client: any) => Promise<T>
 ): Promise<T> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
 
   try {
     await client.query("BEGIN");

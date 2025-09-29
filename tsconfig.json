@@ -18,6 +18,7 @@
     "rootDir": "./src",
     "baseUrl": ".",
     "types": ["node"],
+    "allowImportingTsExtensions": false,
     "paths": {
       "@/*": ["./src/*"],
       "@/config/*": ["./src/config/*"],

@@ -1,4 +1,4 @@
-import { pool } from "./database.js";
+import { getPool } from "./database.js";
 import { DatabaseImageMetadata } from "../types/index.js";
 
 // ===================================
@@ -11,7 +11,7 @@ import { DatabaseImageMetadata } from "../types/index.js";
 export async function saveImageMetadata(
   metadata: DatabaseImageMetadata
 ): Promise<number> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     const query = `
       INSERT INTO image_metadata 
@@ -45,9 +45,9 @@ export async function saveImageMetadata(
 export async function getImageMetadata(
   fileId: string
 ): Promise<DatabaseImageMetadata | null> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
-    const query = "SELECT * FROM image_metadata WHERE file_id = $1";
+    const query = "SELECT * FROM s302.image_metadata WHERE file_id = $1";
     const result = await client.query(query, [fileId]);
     return (result.rows[0] as DatabaseImageMetadata) || null;
   } finally {
@@ -61,10 +61,10 @@ export async function getImageMetadata(
 export async function listUserImages(
   username: string
 ): Promise<DatabaseImageMetadata[]> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     const query = `
-      SELECT * FROM image_metadata 
+      SELECT * FROM s302.image_metadata 
       WHERE uploaded_by = $1 
       ORDER BY created_at DESC
     `;
@@ -79,9 +79,9 @@ export async function listUserImages(
  * Delete image metadata by file ID
  */
 export async function deleteImageMetadata(fileId: string): Promise<boolean> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
-    const query = "DELETE FROM image_metadata WHERE file_id = $1";
+    const query = "DELETE FROM s302.image_metadata WHERE file_id = $1";
     const result = await client.query(query, [fileId]);
     return (result.rowCount ?? 0) > 0;
   } finally {
@@ -96,10 +96,10 @@ export async function getUserImageMetadata(
   username: string,
   fileId: string
 ): Promise<DatabaseImageMetadata | null> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     const query = `
-      SELECT * FROM image_metadata 
+      SELECT * FROM s302.image_metadata 
       WHERE uploaded_by = $1 AND file_id = $2
     `;
     const result = await client.query(query, [username, fileId]);

@@ -11,7 +11,13 @@ COPY package*.json ./
 COPY tsconfig.json ./
 
 # Install ALL deps (dev + prod) for TypeScript build
-RUN npm ci
+# Add retry mechanism and network timeout for better reliability
+RUN npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm config set fetch-retries 5 && \
+    npm config set registry https://registry.npmjs.org/ && \
+    npm ci --no-audit --no-fund --prefer-offline || \
+    (echo "First attempt failed, retrying..." && sleep 10 && npm ci --no-audit --no-fund)
 
 # Copy sources
 COPY src/ ./src/

@@ -1,10 +1,10 @@
 import { Request, Response } from "express";
-import sharp from "sharp";
 import path from "path";
 import fs from "fs";
 import { access } from "fs/promises";
 import { User } from "../types/index.js";
 import { S3Service } from "../services/s3Service.js";
+import { getPool } from "../models/database.js";
 
 import {
   getUserCredits,
@@ -206,10 +206,22 @@ export const createBatchJobs = async (req: Request, res: Response) => {
     // Process each file
     for (const fileId of fileIds) {
       try {
-        // Check if file exists
-        const filePath = path.join("./data/in", fileId);
-        if (!fs.existsSync(filePath)) {
-          failedJobs.push({ fileId, error: "File not found" });
+        // Check if file exists in database (S3-based)
+        try {
+          const fileQuery =
+            "SELECT * FROM s302.files WHERE filename = $1 AND user_id = $2";
+          const fileResult = await getPool().query(fileQuery, [
+            fileId,
+            req.user.id, // Use string ID directly (Cognito UUID)
+          ]);
+
+          if (fileResult.rows.length === 0) {
+            failedJobs.push({ fileId, error: "File not found in database" });
+            continue;
+          }
+        } catch (dbError) {
+          console.error("Database error checking file:", dbError);
+          failedJobs.push({ fileId, error: "Database connection failed" });
           continue;
         }
 
@@ -283,24 +295,21 @@ async function processJobAsync(jobId: number): Promise<void> {
   try {
     updateJobStatus(jobId, "processing");
 
-    const inputPath = path.join("./data/in", job.file_id);
-
     // Generate output filename and S3 key
     const ext = job.params?.format || "jpg";
     const timestamp = Date.now();
     const outputFileName = `processed_${timestamp}_${job.id}.${ext}`;
-    const outputPath = path.join("./data/out", outputFileName);
 
-    // Generate S3 keys
+    // Generate S3 keys (stateless)
     const inputS3Key = `user_${job.user}/${job.file_id}`;
     const outputS3Key = S3Service.generateProcessedKey(
-      1,
+      job.user,
       job.id,
       outputFileName
-    ); // Using user ID 1 as fallback
+    );
 
-    // Execute image processing with S3 support
-    const result = await ImageProcessor.processImage(inputPath, outputPath, {
+    // Execute image processing with S3 support (stateless)
+    const result = await ImageProcessor.processImage("", "", {
       ...job.params,
       inputS3Key: inputS3Key,
       outputS3Key: outputS3Key,
@@ -309,7 +318,7 @@ async function processJobAsync(jobId: number): Promise<void> {
     if (result.success) {
       updateJobStatus(jobId, "completed", {
         outputFile: result.outputFile,
-        outputPath: outputPath,
+        outputPath: outputS3Key, // Use S3 key as path for statelessness
         s3Key: outputS3Key,
         processedAt: new Date(),
       });
@@ -479,24 +488,29 @@ export async function stressTest(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const { iterations = 5, sampleImage }: StressTestRequest = req.body;
+    const { iterations = 5, sampleImageS3Key }: StressTestRequest = req.body;
 
-    if (!sampleImage) {
+    if (!sampleImageS3Key) {
       res.status(400).json({
-        error: "sampleImage filename required",
+        error: "sampleImageS3Key is required for stateless stress test",
         success: false,
       });
       return;
     }
 
-    const inputPath = path.join("./data/in", sampleImage);
-
-    // Check file existence
+    // Check if S3 file exists (stateless)
     try {
-      await access(inputPath);
+      const exists = await S3Service.fileExists(sampleImageS3Key);
+      if (!exists) {
+        res.status(404).json({
+          error: "Sample image not found in S3",
+          success: false,
+        });
+        return;
+      }
     } catch (error) {
-      res.status(404).json({
-        error: "Sample image not found",
+      res.status(500).json({
+        error: "Failed to check S3 file existence",
         success: false,
       });
       return;
@@ -514,10 +528,9 @@ export async function stressTest(req: Request, res: Response): Promise<void> {
       data: response,
     });
 
-    // Execute stress test in background
+    // Execute stress test in background (stateless)
     const result = await ImageProcessor.stressTest(
-      inputPath,
-      "./data/out",
+      sampleImageS3Key,
       iterations
     );
     console.log("Stress test completed:", result);
