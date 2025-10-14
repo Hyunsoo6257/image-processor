@@ -54,6 +54,8 @@
     "@types/node": "^24.5.2",
     "@types/sharp": "^0.31.1",
     "aws-cdk": "^2.1026.0",
+    "aws-cdk-lib": "^2.102.0",
+    "constructs": "^10.3.0",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2"
