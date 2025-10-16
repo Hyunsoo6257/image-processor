@@ -1,7 +1,6 @@
 // Initialize all modules
 import { initAuth } from "./modules/auth.js";
 import { initFiles } from "./modules/files.js";
-import { initJobs } from "./modules/jobs.js";
 import { initCredits } from "./modules/credits.js";
 import { showAlert } from "./modules/utils.js";
 
@@ -13,7 +12,6 @@ window.selectedFiles = new Set();
 document.addEventListener("DOMContentLoaded", () => {
   initAuth();
   initFiles();
-  initJobs();
   initCredits();
 
   // Auto-login on page load

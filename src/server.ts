@@ -4,7 +4,6 @@ import filesRoutes from "./routes/files.js";
 import jobsRoutes from "./routes/jobs.js";
 import creditsRoutes from "./routes/credits.js";
 
-import { EmailService } from "./services/emailService.js";
 import { ConfigService } from "./services/configService.js";
 import { CognitoService } from "./services/cognitoService.js";
 
@@ -17,15 +16,15 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 // Serve static files (Web Client)
 app.use(express.static("public"));
 
-// Request logger for development
-app.use((req, _res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
-  next();
-});
+// Request logger (disabled in production)
+if (process.env.NODE_ENV !== "production") {
+  app.use((req, _res, next) => {
+    console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+    next();
+  });
+}
 
-// Initialize email service
-console.log("📧 Initializing email service...");
-EmailService.initializeTransporter();
+// Email service disabled: remove initialization
 
 // Health check endpoint
 app.get("/health", (req, res) => {
@@ -111,13 +110,13 @@ async function startServer(): Promise<void> {
     );
 
     // test database connection
-    console.log("📊 Testing database connection...");
+    console.log("Testing database connection...");
     const dbConnected = await testConnection();
 
     if (dbConnected) {
       // Skip database initialization - schema already exists
       console.log(
-        "🗄️ Database connection successful - skipping initialization (schema already exists)"
+        "Database connection successful - skipping initialization (schema already exists)"
       );
     } else {
       console.log("⚠️ Database not available, running in memory-only mode");
@@ -125,8 +124,8 @@ async function startServer(): Promise<void> {
 
     // start server
     app.listen(PORT, "0.0.0.0", () => {
-      console.log(`✅ API listening on http://0.0.0.0:${PORT}`);
-      console.log("📋 Available endpoints:");
+      console.log(`API listening on http://0.0.0.0:${PORT}`);
+      console.log("Available endpoints:");
       console.log("  GET  /health - Health check");
       console.log("  POST /auth/login - User authentication (email/password)");
       console.log("  POST /auth/register - User registration");
@@ -145,12 +144,12 @@ async function startServer(): Promise<void> {
       console.log("  GET  /jobs/:id - Get job details");
       console.log("  POST /jobs/stress-test - CPU stress test (admin only)");
       console.log("");
-      console.log("🔑 Default users (migrated to Cognito):");
+      console.log("Default users (migrated to Cognito):");
       console.log("  admin@example.com/admin123 (admin role)");
       console.log("  user1@example.com/user123 (user role)");
       console.log("");
-      console.log("🐘 Database: PostgreSQL (with MySQL fallback)");
-      console.log("📁 Data storage: S3 (stateless)");
+      console.log("Database: PostgreSQL (with MySQL fallback)");
+      console.log("Data storage: S3 (stateless)");
     });
   } catch (error) {
     console.error("❌ Failed to start server:", error);

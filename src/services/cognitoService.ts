@@ -172,24 +172,27 @@ export class CognitoService {
   }
 
   // Handle Google authentication (login/register)
+  // Ensures the user exists in Cognito and returns a placeholder AuthResult
+  // Actual app session (JWT) will be created by controller using the email
   async handleGoogleAuth(googleUserInfo: GoogleUserInfo): Promise<AuthResult> {
     try {
       // 1. Check if user exists
       const existingUser = await this.findUserByEmail(googleUserInfo.email);
 
       if (existingUser) {
-        // 2. Link Google account (simplified - no custom attributes)
+        // 2. Link Google account (no custom attributes maintained currently)
         await this.linkGoogleAccount(existingUser.username, googleUserInfo);
-
-        // 3. Login user (check for MFA)
-        return await this.loginUser(existingUser.email, "", true);
       } else {
-        // 4. Create new user
-        const username = await this.createGoogleUser(googleUserInfo);
-
-        // 5. Login user
-        return await this.loginUser(googleUserInfo.email, "", true);
+        // 3. Create new user in Cognito if not exists
+        await this.createGoogleUser(googleUserInfo);
       }
+
+      // 4. Return placeholder - controller will create app JWT using email
+      return {
+        accessToken: "",
+        idToken: "",
+        refreshToken: "",
+      };
     } catch (error) {
       console.error("Error handling Google auth:", error);
       throw error;
@@ -247,14 +250,12 @@ export class CognitoService {
         // Don't fail user creation if group addition fails
       }
 
-      // Initialize Google user credits
+      // Initialize Google user credits (default 10 for regular users)
       try {
         const { createUserCredits } = await import("../models/credits.js");
         await createUserCredits(googleUserInfo.email, "user");
-        console.log(`Google user ${googleUserInfo.email} credits initialized`);
       } catch (creditError) {
         console.error("Error initializing Google user credits:", creditError);
-        // Don't fail user creation if credit initialization fails
       }
 
       return username;
@@ -301,8 +302,6 @@ export class CognitoService {
 
       const result = await this.client.send(command);
       const userSub = result.UserSub || "";
-
-      console.log(`User ${email} registered, requires email confirmation`);
 
       return {
         username: userSub,
@@ -810,13 +809,19 @@ export class CognitoService {
   }
 
   // Handle Google OAuth callback
-  async handleGoogleCallback(code: string, state: string): Promise<AuthResult> {
+  // Returns placeholder AuthResult; controller should use the email to build session
+  async handleGoogleCallback(
+    code: string,
+    state: string
+  ): Promise<AuthResult & { email: string }> {
     try {
       // Get user info from Google
       const googleUserInfo = await this.getGoogleUserInfo(code);
 
-      // Handle Google authentication
-      return await this.handleGoogleAuth(googleUserInfo);
+      // Ensure user exists in Cognito (create/link as needed)
+      const result = await this.handleGoogleAuth(googleUserInfo);
+      // Return email for controller to look up the user and mint app token
+      return { ...result, email: googleUserInfo.email };
     } catch (error) {
       console.error("Error handling Google callback:", error);
       throw error;

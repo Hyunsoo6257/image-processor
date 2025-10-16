@@ -10,11 +10,6 @@ import { ImageProcessor } from "../services/imageProcessor.js";
 import { S3Service } from "../services/s3Service.js";
 import { getPool } from "../models/database.js";
 import { saveImageMetadata } from "../models/images.js";
-import { listJobsByUser } from "../models/jobs.js";
-
-// In-memory registry of uploads as a fallback when DB is unavailable
-// Maps fileId (filename on disk) -> username of uploader
-const uploadRegistry: Map<string, string> = new Map();
 
 // Multer populates req.file; we simply return the saved name/path.
 export async function handleUpload(req: Request, res: Response): Promise<void> {
@@ -76,11 +71,6 @@ export async function handleUpload(req: Request, res: Response): Promise<void> {
       console.warn("Failed to save metadata to database:", dbError);
       // even if the database save fails, the file upload is still successful
     }
-
-    // Record uploader in in-memory registry as a fallback for filtering
-    try {
-      uploadRegistry.set(req.file.filename, req.user.username);
-    } catch {}
 
     const response: FileUploadResponse = {
       fileId: req.file.filename,

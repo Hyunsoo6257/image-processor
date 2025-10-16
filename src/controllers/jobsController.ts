@@ -11,12 +11,7 @@ import {
   deductCredits,
   refundCredits,
 } from "../models/credits.js";
-import {
-  createJob as createJobModel,
-  listJobsByUser,
-  findJobById,
-  updateJobStatus,
-} from "../models/jobs.js";
+
 import { ImageProcessor } from "../services/imageProcessor.js";
 import {
   CreateJobRequest,
@@ -116,22 +111,21 @@ export async function createJob(req: Request, res: Response): Promise<void> {
       }
     }
 
-    // Create job
-    const job = createJobModel(req.user, fileId, params || null);
+    // DB-only: insert job row
+    const jobInsert = await getPool().query(
+      `INSERT INTO s302.jobs (file_id, user_id, status, created_at, params)
+     VALUES ($1, $2, 'pending', NOW(), $3) RETURNING id`,
+      [fileId, req.user.id, JSON.stringify(params || {})]
+    );
+    const jobId = jobInsert.rows[0].id;
 
-    // Deduct credits for non-admin users (after job creation)
     if (req.user.role !== "admin") {
-      await deductCreditsSafely(req.user.username, job.id, 1, req.user.role);
+      await deductCreditsSafely(req.user.username, jobId, 1, req.user.role);
     }
 
-    // Start asynchronous processing
-    processJobAsync(job.id);
+    processJobAsync(jobId);
 
-    res.json({
-      success: true,
-      data: job,
-      message: "Job created successfully",
-    });
+    res.json({ success: true, data: { id: jobId, fileId, status: "pending" } });
   } catch (error) {
     console.error("Create job error:", error);
     res.status(500).json({
@@ -200,8 +194,8 @@ export const createBatchJobs = async (req: Request, res: Response) => {
       }
     }
 
-    const jobs = [];
-    const failedJobs = [];
+    const jobs = [] as Array<{ id: number; file_id: string; status: string }>;
+    const failedJobs = [] as Array<{ fileId: string; error: string }>;
 
     // Process each file
     for (const fileId of fileIds) {
@@ -226,8 +220,17 @@ export const createBatchJobs = async (req: Request, res: Response) => {
         }
 
         // Create job using existing function
-        const job = createJobModel(req.user, fileId, params || null);
-        jobs.push(job);
+        const jobInsert = await getPool().query(
+          `INSERT INTO s302.jobs (file_id, user_id, status, created_at, params)
+           VALUES ($1, $2, 'pending', NOW(), $3) RETURNING id`,
+          [fileId, req.user.id, JSON.stringify(params || {})]
+        );
+        const job = {
+          id: jobInsert.rows[0].id,
+          file_id: fileId,
+          status: "pending",
+        };
+        jobs.push(job as any);
 
         // Deduct credits for non-admin users
         if (req.user.role !== "admin") {
@@ -284,8 +287,13 @@ export const createBatchJobs = async (req: Request, res: Response) => {
 
 // Asynchronous image processing function
 async function processJobAsync(jobId: number): Promise<void> {
-  const job = findJobById(jobId);
-  if (!job) return;
+  // Load job from DB
+  const jobRes = await getPool().query(
+    "SELECT * FROM s302.jobs WHERE id = $1",
+    [jobId]
+  );
+  if (jobRes.rows.length === 0) return;
+  const job = jobRes.rows[0];
 
   const startTime = Date.now();
   let success = false;
@@ -293,15 +301,18 @@ async function processJobAsync(jobId: number): Promise<void> {
   let outputFileName: string | undefined;
 
   try {
-    updateJobStatus(jobId, "processing");
+    await getPool().query(
+      "UPDATE s302.jobs SET status='processing', updated_at=NOW() WHERE id=$1",
+      [jobId]
+    );
 
     // Generate output filename and S3 key
-    const ext = job.params?.format || "jpg";
+    const ext = (job.params && job.params.format) || "jpg";
     const timestamp = Date.now();
     const outputFileName = `processed_${timestamp}_${job.id}.${ext}`;
 
     // Generate S3 keys (stateless)
-    const inputS3Key = `user_${job.user}/${job.file_id}`;
+    const inputS3Key = `user_${job.user_id}/${job.file_id}`;
     const outputS3Key = S3Service.generateProcessedKey(
       job.user,
       job.id,
@@ -316,12 +327,18 @@ async function processJobAsync(jobId: number): Promise<void> {
     });
 
     if (result.success) {
-      updateJobStatus(jobId, "completed", {
-        outputFile: result.outputFile,
-        outputPath: outputS3Key, // Use S3 key as path for statelessness
-        s3Key: outputS3Key,
-        processedAt: new Date(),
-      });
+      await getPool().query(
+        "UPDATE s302.jobs SET status='completed', updated_at=NOW(), result=$1 WHERE id=$2",
+        [
+          JSON.stringify({
+            outputFile: result.outputFile,
+            outputPath: outputS3Key,
+            s3Key: outputS3Key,
+            processedAt: new Date(),
+          }),
+          jobId,
+        ]
+      );
     } else {
       throw new Error(result.error || "Image processing failed");
     }
@@ -330,25 +347,26 @@ async function processJobAsync(jobId: number): Promise<void> {
   } catch (error) {
     console.error(`Job ${jobId} failed:`, error);
     errorMessage = error instanceof Error ? error.message : "Unknown error";
-    updateJobStatus(jobId, "failed", {
-      error: errorMessage,
-    });
+    await getPool().query(
+      "UPDATE s302.jobs SET status='failed', updated_at=NOW(), result=$1 WHERE id=$2",
+      [JSON.stringify({ error: errorMessage }), jobId]
+    );
   } finally {
     const processingTime = Date.now() - startTime;
 
     // Refund credits if job failed for non-admin users
-    if (!success && job.user !== "admin") {
+    if (!success && job.user_id !== "admin") {
       try {
-        await refundCredits(job.user, job.id, 1);
+        await refundCredits(job.user_id, job.id, 1);
       } catch (refundError) {
         console.warn("Failed to refund credits (DB):", refundError);
         try {
-          refundCreditsFallback(job.user, "user", 1);
+          refundCreditsFallback(job.user_id, "user", 1);
         } catch (e) {
           console.warn("Fallback refund failed:", e);
         }
       }
-      console.log(`✅ Credits refunded for failed job ${job.id}`);
+      console.log(`Credits refunded for failed job ${job.id}`);
     }
 
     // record data with ACID requirements (only when database connection is established)
@@ -390,7 +408,11 @@ export async function listJobs(req: Request, res: Response): Promise<void> {
       sort = "-created_at",
     }: JobListQuery = req.query;
 
-    const all = await listJobsByUser(req.user);
+    const allRes = await getPool().query(
+      `SELECT * FROM s302.jobs WHERE user_id = $1`,
+      [req.user.id]
+    );
+    const all = allRes.rows;
     const filtered = status ? all.filter((j) => j.status === status) : all;
 
     const key = sort.replace(/^-/, "");
@@ -446,101 +468,30 @@ export function getJob(req: Request, res: Response): void {
       return;
     }
 
-    const job = findJobById(jobId);
-
-    if (!job) {
-      res.status(404).json({
-        error: "Job not found",
-        success: false,
+    // Load job from DB and enforce access control
+    getPool()
+      .query(
+        `SELECT j.* FROM s302.jobs j WHERE j.id = $1 AND (j.user_id = $2 OR $3 = 'admin')`,
+        [jobId, req.user.id, req.user.role]
+      )
+      .then((r) => {
+        if (r.rows.length === 0) {
+          res
+            .status(404)
+            .json({ success: false, error: "Job not found or access denied" });
+          return;
+        }
+        res.json({ success: true, data: r.rows[0] });
+      })
+      .catch((e) => {
+        console.error("Get job error:", e);
+        res.status(500).json({ success: false, error: "Failed to get job" });
       });
-      return;
-    }
-
-    if (req.user.role !== "admin" && job.user !== req.user.username) {
-      res.status(403).json({
-        error: "Access denied",
-        success: false,
-      });
-      return;
-    }
-
-    res.json({
-      success: true,
-      data: job,
-    });
   } catch (error) {
     console.error("Get job error:", error);
     res.status(500).json({
       error: "Failed to get job",
       success: false,
     });
-  }
-}
-
-// Batch image processing for system optimization (admin access only)
-export async function stressTest(req: Request, res: Response): Promise<void> {
-  try {
-    if (!req.user || req.user.role !== "admin") {
-      res.status(403).json({
-        error: "Admin access required",
-        success: false,
-      });
-      return;
-    }
-
-    const { iterations = 5, sampleImageS3Key }: StressTestRequest = req.body;
-
-    if (!sampleImageS3Key) {
-      res.status(400).json({
-        error: "sampleImageS3Key is required for stateless stress test",
-        success: false,
-      });
-      return;
-    }
-
-    // Check if S3 file exists (stateless)
-    try {
-      const exists = await S3Service.fileExists(sampleImageS3Key);
-      if (!exists) {
-        res.status(404).json({
-          error: "Sample image not found in S3",
-          success: false,
-        });
-        return;
-      }
-    } catch (error) {
-      res.status(500).json({
-        error: "Failed to check S3 file existence",
-        success: false,
-      });
-      return;
-    }
-
-    // Start stress test (asynchronous)
-    const response: StressTestResponse = {
-      message: "Stress test started",
-      iterations,
-      estimatedDuration: `${iterations * 2} seconds`,
-    };
-
-    res.json({
-      success: true,
-      data: response,
-    });
-
-    // Execute stress test in background (stateless)
-    const result = await ImageProcessor.stressTest(
-      sampleImageS3Key,
-      iterations
-    );
-    console.log("Stress test completed:", result);
-  } catch (error) {
-    console.error("Stress test error:", error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: error instanceof Error ? error.message : "Stress test failed",
-        success: false,
-      });
-    }
   }
 }

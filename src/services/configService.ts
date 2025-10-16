@@ -132,7 +132,7 @@ export class ConfigService {
    */
   static async initializeConfig(): Promise<void> {
     try {
-      console.log("🔧 Initializing application configuration...");
+      console.log("Initializing application configuration...");
 
       // Load database credentials from AWS Secrets Manager
       const dbCredentials = await this.getSecret(
@@ -140,11 +140,7 @@ export class ConfigService {
       );
 
       // Set environment variables
-      console.log("🔧 Setting environment variables...");
-      console.log("🔧 DB_HOST:", dbCredentials.host);
-      console.log("🔧 DB_USER:", dbCredentials.username);
-      console.log("🔧 DB_NAME:", dbCredentials.database);
-      console.log("🔧 DB_PORT:", dbCredentials.port);
+      console.log("Setting environment variables...");
 
       process.env.DB_HOST = dbCredentials.host;
       process.env.DB_USER = dbCredentials.username;
@@ -167,7 +163,7 @@ export class ConfigService {
         process.env.EMAIL_PORT = emailCredentials.port;
         process.env.EMAIL_USER = emailCredentials.user;
         process.env.EMAIL_PASS = emailCredentials.pass;
-        console.log("✅ Email credentials loaded from Secrets Manager");
+        console.log("Email credentials loaded from Secrets Manager");
       } catch (error) {
         console.log(
           "⚠️ Email credentials not found in Secrets Manager, using environment variables"
@@ -178,7 +174,7 @@ export class ConfigService {
       try {
         const unsplashKeys = await this.getSecret("n11837845/unsplash-keys");
         process.env.UNSPLASH_ACCESS_KEY = unsplashKeys.UNSPLASH_ACCESS_KEY;
-        console.log("✅ Unsplash API keys loaded from Secrets Manager");
+        console.log("Unsplash API keys loaded from Secrets Manager");
       } catch (error) {
         console.log(
           "⚠️ Unsplash API keys not found in Secrets Manager, using environment variables"
@@ -193,7 +189,7 @@ export class ConfigService {
         process.env.COGNITO_CLIENT_SECRET = cognitoConfig.COGNITO_CLIENT_SECRET;
         process.env.COGNITO_REGION =
           cognitoConfig.COGNITO_REGION || "ap-southeast-2";
-        console.log("✅ Cognito configuration loaded from Secrets Manager");
+        console.log("Cognito configuration loaded from Secrets Manager");
       } catch (error) {
         console.log(
           "⚠️ Cognito configuration not found in Secrets Manager, using environment variables"
@@ -208,12 +204,31 @@ export class ConfigService {
         process.env.GOOGLE_CLIENT_ID = googleConfig.GOOGLE_CLIENT_ID;
         process.env.GOOGLE_CLIENT_SECRET = googleConfig.GOOGLE_CLIENT_SECRET;
         process.env.GOOGLE_REDIRECT_URI = googleConfig.GOOGLE_REDIRECT_URI;
-        console.log(
-          "✅ Google OAuth configuration loaded from Secrets Manager"
-        );
+        console.log("Google OAuth configuration loaded from Secrets Manager");
       } catch (error) {
         console.log(
           "⚠️ Google OAuth configuration not found in Secrets Manager, using environment variables"
+        );
+      }
+
+      // FRONTEND_URL loading strategy (Parameter Store preferred)
+      try {
+        if (!process.env.FRONTEND_URL) {
+          const appDomain = await this.getParameter(
+            "/n11837845/config/application-domain"
+          );
+          if (appDomain) {
+            const trimmed = appDomain.trim();
+            const hasScheme = /^https?:\/\//i.test(trimmed);
+            process.env.FRONTEND_URL = hasScheme
+              ? trimmed
+              : `https://${trimmed}`;
+            console.log("FRONTEND_URL loaded from SSM Parameter Store");
+          }
+        }
+      } catch (error) {
+        console.log(
+          "⚠️ FRONTEND_URL not found in Parameter Store, will fall back to GOOGLE_REDIRECT_URI origin or env"
         );
       }
 
@@ -229,13 +244,8 @@ export class ConfigService {
       global.JWT_SECRET = dbCredentials.jwtSecret;
       global.AWS_REGION = dbCredentials.awsRegion;
 
-      console.log("✅ Environment variables set successfully");
-      console.log("🔧 DB_HOST after setting:", process.env.DB_HOST);
-      console.log("🔧 DB_USER after setting:", process.env.DB_USER);
-
-      console.log("✅ Configuration loaded successfully");
-      console.log("🌐 S3 Bucket:", dbCredentials.s3BucketName);
-      console.log("🗄️ Database:", dbCredentials.host);
+      console.log("Environment variables set successfully");
+      console.log("Configuration loaded successfully");
     } catch (error) {
       console.error("❌ Failed to initialize configuration:", error);
       console.log("⚠️ Falling back to environment variables");

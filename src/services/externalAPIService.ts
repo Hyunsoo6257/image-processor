@@ -1,7 +1,6 @@
 import axios from "axios";
 import { getPool } from "../models/database.js";
 import { ImageProcessor } from "./imageProcessor.js";
-import { EmailService } from "./emailService.js";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -48,11 +47,10 @@ export class ExternalAPIService {
         };
       }
 
-      console.log("🔍 Searching Unsplash for:", searchTerm);
-      console.log(
-        "🔑 API Key:",
-        this.UNSPLASH_ACCESS_KEY.substring(0, 10) + "..."
-      );
+      // Reduced logging in production
+      if (process.env.NODE_ENV !== "production") {
+        console.log("Searching Unsplash for:", searchTerm);
+      }
 
       // Call Unsplash API to get random image
       const response = await axios.get(
@@ -69,7 +67,9 @@ export class ExternalAPIService {
         }
       );
 
-      console.log("✅ Unsplash API response received");
+      if (process.env.NODE_ENV !== "production") {
+        console.log("Unsplash API response received");
+      }
 
       if (response.data && response.data.length > 0) {
         const photo = response.data[0];
@@ -98,178 +98,8 @@ export class ExternalAPIService {
         };
       }
     } catch (error) {
-      console.error("❌ Unsplash API error:", error);
-
-      // Return demo data only if API key is demo_key
-      if (
-        this.UNSPLASH_ACCESS_KEY === "demo_key" ||
-        !this.UNSPLASH_ACCESS_KEY
-      ) {
-        console.log("🔄 Using demo data (demo key detected)");
-        // Different demo images based on search term
-        const demoImages = {
-          human: {
-            id: "demo_human_123",
-            url: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800&h=600&fit=crop",
-            thumb:
-              "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=300&fit=crop",
-            description: "Demo Human Portrait",
-            author: "Demo Photographer",
-            authorUrl: "https://unsplash.com",
-            downloadUrl:
-              "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800&h=600&fit=crop",
-            width: 800,
-            height: 600,
-          },
-          mountain: {
-            id: "demo_mountain_123",
-            url: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&h=600&fit=crop",
-            thumb:
-              "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=300&fit=crop",
-            description: "Demo Mountain Landscape",
-            author: "Demo Photographer",
-            authorUrl: "https://unsplash.com",
-            downloadUrl:
-              "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&h=600&fit=crop",
-            width: 800,
-            height: 600,
-          },
-          nature: {
-            id: "demo_nature_123",
-            url: "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&h=600&fit=crop",
-            thumb:
-              "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=400&h=300&fit=crop",
-            description: "Demo Nature Scene",
-            author: "Demo Photographer",
-            authorUrl: "https://unsplash.com",
-            downloadUrl:
-              "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&h=600&fit=crop",
-            width: 800,
-            height: 600,
-          },
-          city: {
-            id: "demo_city_123",
-            url: "https://images.unsplash.com/photo-1449824913935-59a10b8d2000?w=800&h=600&fit=crop",
-            thumb:
-              "https://images.unsplash.com/photo-1449824913935-59a10b8d2000?w=400&h=300&fit=crop",
-            description: "Demo City View",
-            author: "Demo Photographer",
-            authorUrl: "https://unsplash.com",
-            downloadUrl:
-              "https://images.unsplash.com/photo-1449824913935-59a10b8d2000?w=800&h=600&fit=crop",
-            width: 800,
-            height: 600,
-          },
-          food: {
-            id: "demo_food_123",
-            url: "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=800&h=600&fit=crop",
-            thumb:
-              "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=400&h=300&fit=crop",
-            description: "Demo Coffee Photography",
-            author: "Demo Photographer",
-            authorUrl: "https://unsplash.com",
-            downloadUrl:
-              "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=800&h=600&fit=crop",
-            width: 800,
-            height: 600,
-          },
-        };
-
-        // Get appropriate demo image based on search term
-        const searchLower = searchTerm.toLowerCase();
-        let demoImage = demoImages.food; // default to food (includes coffee)
-
-        // More flexible search matching
-        if (
-          searchLower.includes("human") ||
-          searchLower.includes("person") ||
-          searchLower.includes("portrait") ||
-          searchLower.includes("people") ||
-          searchLower.includes("face") ||
-          searchLower.includes("man") ||
-          searchLower.includes("woman") ||
-          searchLower.includes("boy") ||
-          searchLower.includes("girl") ||
-          searchLower.includes("student") ||
-          searchLower.includes("professor") ||
-          searchLower.includes("teacher")
-        ) {
-          demoImage = demoImages.human;
-        } else if (
-          searchLower.includes("mountain") ||
-          searchLower.includes("landscape") ||
-          searchLower.includes("peak") ||
-          searchLower.includes("hill") ||
-          searchLower.includes("rock") ||
-          searchLower.includes("cliff") ||
-          searchLower.includes("summit")
-        ) {
-          demoImage = demoImages.mountain;
-        } else if (
-          searchLower.includes("nature") ||
-          searchLower.includes("forest") ||
-          searchLower.includes("tree") ||
-          searchLower.includes("green") ||
-          searchLower.includes("plant") ||
-          searchLower.includes("flower") ||
-          searchLower.includes("garden") ||
-          searchLower.includes("park") ||
-          searchLower.includes("grass") ||
-          searchLower.includes("meadow")
-        ) {
-          demoImage = demoImages.nature;
-        } else if (
-          searchLower.includes("city") ||
-          searchLower.includes("urban") ||
-          searchLower.includes("building") ||
-          searchLower.includes("street") ||
-          searchLower.includes("town") ||
-          searchLower.includes("architecture") ||
-          searchLower.includes("skyline") ||
-          searchLower.includes("downtown") ||
-          searchLower.includes("uni") ||
-          searchLower.includes("university") ||
-          searchLower.includes("college") ||
-          searchLower.includes("school") ||
-          searchLower.includes("campus") ||
-          searchLower.includes("education") ||
-          searchLower.includes("academic")
-        ) {
-          demoImage = demoImages.city;
-        } else if (
-          searchLower.includes("food") ||
-          searchLower.includes("meal") ||
-          searchLower.includes("dish") ||
-          searchLower.includes("cooking") ||
-          searchLower.includes("restaurant") ||
-          searchLower.includes("chef") ||
-          searchLower.includes("kitchen") ||
-          searchLower.includes("delicious") ||
-          searchLower.includes("pizza") ||
-          searchLower.includes("burger") ||
-          searchLower.includes("pasta") ||
-          searchLower.includes("coffee") ||
-          searchLower.includes("tea") ||
-          searchLower.includes("drink") ||
-          searchLower.includes("beverage") ||
-          searchLower.includes("cafe") ||
-          searchLower.includes("latte") ||
-          searchLower.includes("espresso") ||
-          searchLower.includes("cappuccino")
-        ) {
-          demoImage = demoImages.food;
-        }
-
-        return {
-          success: true,
-          image: demoImage,
-        };
-      } else {
-        return {
-          success: false,
-          error: "Failed to fetch random image",
-        };
-      }
+      console.error("Unsplash API error:", error);
+      return { success: false, error: "Failed to fetch random image" };
     }
   }
 
@@ -361,79 +191,7 @@ export class ExternalAPIService {
   }
 
   // Share processed image via email
-  static async shareImageViaEmail(
-    jobId: number,
-    userId: string,
-    toEmail: string,
-    subject: string = "Processed Image",
-    message: string = "Here's your processed image!"
-  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    try {
-      // Get job information
-      let job;
-      try {
-        // Try database first
-        const { findJobById } = await import("../models/jobs.js");
-        job = await findJobById(jobId);
-      } catch (dbError) {
-        console.warn(
-          "Database not available for job lookup, using memory:",
-          dbError
-        );
-        // Use memory job store
-        const { findJobById } = await import("../models/jobs.js");
-        job = findJobById(jobId);
-      }
-
-      if (!job) {
-        return { success: false, error: "Job not found" };
-      }
-
-      if (job.status !== "completed") {
-        return { success: false, error: "Job is not completed" };
-      }
-
-      if (!job.result || !job.result.outputFile) {
-        return { success: false, error: "No output file found" };
-      }
-
-      // Get the processed image path
-      const outputPath = path.join(
-        process.cwd(),
-        "data",
-        "out",
-        job.result.outputFile
-      );
-
-      // Check if file exists
-      const fs = await import("fs");
-      if (!fs.existsSync(outputPath)) {
-        return { success: false, error: "Processed image file not found" };
-      }
-
-      // Send email with attachment
-      const { EmailService } = await import("./emailService.js");
-
-      const result = await EmailService.sendImageEmail(
-        toEmail,
-        outputPath,
-        job.result.outputFile,
-        subject,
-        message
-      );
-
-      return result;
-    } catch (error) {
-      console.error("Email sharing error:", error);
-      return {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to share image via email",
-      };
-    }
-  }
+  // Email sharing removed
 
   /**
    * Get processed image file path for download

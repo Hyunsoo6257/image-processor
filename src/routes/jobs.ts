@@ -6,8 +6,8 @@ import { ExternalAPIService } from "../services/externalAPIService.js";
 import { S3Service } from "../services/s3Service.js";
 import path from "path";
 import { checkUserCredits } from "../controllers/creditController.js";
+import { Job } from "../types/index.js";
 import fs from "fs";
-// import { addCompletedJob } from "../models/jobs.js"; // Removed - function doesn't exist
 
 const router = express.Router();
 
@@ -65,7 +65,7 @@ router.get("/", authenticateToken, async (req, res) => {
         req.user!.username,
         memoryJobs.length
       );
-      memoryJobs.forEach((job) => {
+      memoryJobs.forEach((job: Job) => {
         console.log(
           `Job: ${job.id}, File: ${job.file_id}, Status: ${job.status}, Result:`,
           job.result
@@ -377,55 +377,6 @@ router.post("/batch-process", authenticateToken, async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to batch process files",
-    });
-  }
-});
-
-// External API: Share processed image via email
-router.post("/share-image", authenticateToken, async (req, res) => {
-  try {
-    const { jobId, toEmail, subject, message } = req.body;
-    const userId = req.user!.id; // Use string ID directly (Cognito UUID)
-
-    if (!jobId) {
-      return res.status(400).json({
-        success: false,
-        error: "Job ID is required",
-      });
-    }
-
-    if (!toEmail) {
-      return res.status(400).json({
-        success: false,
-        error: "Recipient email is required",
-      });
-    }
-
-    const result = await ExternalAPIService.shareImageViaEmail(
-      jobId,
-      userId, // userId is already a number
-      toEmail,
-      subject,
-      message
-    );
-
-    if (result.success) {
-      res.json({
-        success: true,
-        messageId: result.messageId,
-        message: "Image shared via email successfully",
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        error: result.error,
-      });
-    }
-  } catch (error) {
-    console.error("Error sharing image via email:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to share image via email",
     });
   }
 });

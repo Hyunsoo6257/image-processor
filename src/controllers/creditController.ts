@@ -6,12 +6,6 @@ import {
   grantCredits,
 } from "../models/credits.js";
 import { GrantCreditsRequest } from "../types/index.js";
-import {
-  getCreditsFallback,
-  listAllUsersCreditsFallback,
-  grantCreditsFallback,
-  hasEnoughCreditsFallback,
-} from "../models/creditsFallback.js";
 
 export async function getCurrentUserCredits(
   req: Request,
@@ -36,16 +30,8 @@ export async function getCurrentUserCredits(
       });
     }
   } catch (error) {
-    console.warn("Database not available for credits:", error);
-    // Return fallback credits when database is not available
-    const fallback = getCreditsFallback(
-      req.user!.username,
-      req.user!.role as any
-    );
-    res.json({
-      success: true,
-      data: fallback,
-    });
+    console.error("Credits query failed:", error);
+    res.status(500).json({ success: false, error: "Failed to load credits" });
   }
 }
 
@@ -68,12 +54,8 @@ export async function getAllUsersCredits(
       data: users,
     });
   } catch (error) {
-    console.warn("Database not available for user credits:", error);
-    // Return fallback users when database is not available
-    res.json({
-      success: true,
-      data: listAllUsersCreditsFallback(),
-    });
+    console.error("Failed to load user credits list:", error);
+    res.status(500).json({ success: false, error: "Failed to load users" });
   }
 }
 
@@ -132,12 +114,7 @@ export async function grantCreditsToUser(
       return;
     }
 
-    try {
-      await grantCredits(username, creditsToGrant, req.user!.username);
-    } catch (e) {
-      console.warn("Grant via DB failed, using fallback:", e);
-      grantCreditsFallback(username, creditsToGrant);
-    }
+    await grantCredits(username, creditsToGrant, req.user!.username);
 
     res.json({
       success: true,
@@ -145,10 +122,7 @@ export async function grantCreditsToUser(
     });
   } catch (error) {
     console.error("Grant credits error:", error);
-    res.status(500).json({
-      error: "Failed to grant credits",
-      success: false,
-    });
+    res.status(500).json({ success: false, error: "Failed to grant credits" });
   }
 }
 
@@ -159,18 +133,11 @@ export async function checkUserCredits(
   requiredAmount: number
 ): Promise<boolean> {
   try {
-    // Try database first
     const userCredits = await getUserCredits(username);
-    if (userCredits) {
-      return role === "admin" || userCredits.credits >= requiredAmount;
-    }
+    if (!userCredits) return role === "admin" ? true : false;
+    return role === "admin" || userCredits.credits >= requiredAmount;
   } catch (error) {
-    console.warn(
-      "Database not available for credit check, using fallback:",
-      error
-    );
+    console.error("Credit check failed:", error);
+    return role === "admin" ? true : false;
   }
-
-  // Use fallback
-  return hasEnoughCreditsFallback(username, requiredAmount);
 }

@@ -10,6 +10,7 @@ import {
   LoginResponse,
   AuthenticatedUser,
 } from "../types/index.js";
+import { createUserCredits } from "../models/credits.js";
 
 // Get CognitoService instance (will be initialized in server.ts)
 const getCognitoService = () => CognitoService.getInstance();
@@ -88,163 +89,6 @@ export async function login(req: Request, res: Response): Promise<void> {
   }
 }
 
-// Respond to MFA challenge
-export async function respondToMfaChallenge(
-  req: Request,
-  res: Response
-): Promise<void> {
-  try {
-    const { session, userCode, username } = req.body;
-
-    if (!session || !userCode || !username) {
-      res.status(400).json({
-        error: "Session, user code, and username are required",
-        success: false,
-      });
-      return;
-    }
-
-    const authResult: AuthResult =
-      await getCognitoService().respondToMfaChallenge(
-        session,
-        userCode,
-        username
-      );
-    const user = await getCognitoService().getUser(authResult.accessToken);
-
-    const authenticatedUser: AuthenticatedUser = {
-      id: user.username,
-      username: user.email,
-      role: user.role,
-    };
-
-    const token = generateToken(authenticatedUser);
-
-    res.json({
-      success: true,
-      token,
-      user: authenticatedUser,
-      message: "MFA authentication successful",
-    });
-  } catch (error) {
-    console.error("MFA challenge error:", error);
-    res.status(401).json({
-      error: "Invalid MFA code",
-      success: false,
-    });
-  }
-}
-
-// Setup MFA token
-export async function setupMfa(req: Request, res: Response): Promise<void> {
-  try {
-    const { session, username } = req.body;
-
-    if (!session || !username) {
-      res.status(400).json({
-        error: "Session and username are required",
-        success: false,
-      });
-      return;
-    }
-
-    // Use session-based MFA setup
-    const cognitoService = getCognitoService();
-    const secretCode = await cognitoService.associateSoftwareTokenWithSession(
-      session,
-      username
-    );
-
-    // Get the new session for verification
-    const newSession = (cognitoService as any).lastMfaSetupSession;
-
-    res.json({
-      success: true,
-      secretCode,
-      session: newSession,
-      message: "MFA setup initiated",
-    });
-  } catch (error) {
-    console.error("MFA setup error:", error);
-    res.status(500).json({
-      error: "Failed to setup MFA",
-      success: false,
-    });
-  }
-}
-
-// Verify MFA token
-export async function verifyMfaToken(
-  req: Request,
-  res: Response
-): Promise<void> {
-  try {
-    const { userCode, session, username } = req.body;
-
-    console.log("MFA verification request:", {
-      userCode,
-      session: session?.substring(0, 20) + "...",
-      username,
-    });
-
-    if (!userCode || !session || !username) {
-      res.status(400).json({
-        error: "User code, session, and username are required",
-        success: false,
-      });
-      return;
-    }
-
-    // Use session-based MFA verification for MFA_SETUP challenge
-    // Get the stored session from the CognitoService
-    const cognitoService = getCognitoService();
-    const mfaSetupSession =
-      (cognitoService as any).lastMfaSetupSession || session;
-
-    const authResult: AuthResult = await cognitoService.respondToMfaChallenge(
-      mfaSetupSession,
-      userCode,
-      username,
-      "MFA_SETUP"
-    );
-
-    console.log("MFA challenge result:", {
-      hasAccessToken: !!authResult.accessToken,
-      challengeName: authResult.challengeName,
-    });
-
-    if (authResult.accessToken) {
-      const user = await getCognitoService().getUser(authResult.accessToken);
-
-      const authenticatedUser: AuthenticatedUser = {
-        id: user.username,
-        username: user.email,
-        role: user.role,
-      };
-
-      const token = generateToken(authenticatedUser);
-
-      res.json({
-        success: true,
-        token,
-        user: authenticatedUser,
-        message: "MFA verification successful",
-      });
-    } else {
-      res.status(401).json({
-        error: "Invalid MFA code",
-        success: false,
-      });
-    }
-  } catch (error) {
-    console.error("MFA verification error:", error);
-    res.status(401).json({
-      error: "Invalid MFA code",
-      success: false,
-    });
-  }
-}
-
 // Get Google auth URL
 export async function getGoogleAuthUrl(
   req: Request,
@@ -291,25 +135,42 @@ export async function handleGoogleCallback(
       return;
     }
 
-    const authResult: AuthResult =
-      await getCognitoService().handleGoogleCallback(
-        code as string,
-        state as string
-      );
-    const user = await getCognitoService().getUser(authResult.accessToken);
+    const result = await getCognitoService().handleGoogleCallback(
+      code as string,
+      state as string
+    );
+
+    // Look up user by email to build app session
+    const foundUser = await getCognitoService().findUserByEmail(result.email);
+    if (!foundUser) {
+      res.status(401).json({
+        error: "User not found after Google authentication",
+        success: false,
+      });
+      return;
+    }
 
     const authenticatedUser: AuthenticatedUser = {
-      id: user.username,
-      username: user.email,
-      role: user.role,
+      id: foundUser.username,
+      username: foundUser.email,
+      role: foundUser.role,
     };
 
     const token = generateToken(authenticatedUser);
 
     // Redirect to frontend with token
-    const redirectUrl = `${
-      process.env.FRONTEND_URL || "http://localhost:3000"
-    }/auth/callback?token=${token}`;
+    const baseUrl =
+      process.env.FRONTEND_URL ||
+      (() => {
+        try {
+          const u = new URL(process.env.GOOGLE_REDIRECT_URI || "");
+          return `${u.protocol}//${u.host}`; // origin only
+        } catch {
+          return "http://localhost:3000";
+        }
+      })();
+
+    const redirectUrl = `${baseUrl}/auth/?token=${token}`;
     res.redirect(redirectUrl);
   } catch (error) {
     console.error("Google callback error:", error);
