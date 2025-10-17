@@ -53,18 +53,6 @@ function updateUI() {
     if (logoutBtn) {
       logoutBtn.addEventListener("click", handleLogout);
     }
-
-    // Setup MFA button
-    const mfaSetupBtn = document.getElementById("mfa-setup-btn");
-    if (mfaSetupBtn) {
-      mfaSetupBtn.addEventListener("click", () => {
-        if (window.setupMfa) {
-          window.setupMfa();
-        } else {
-          showAlert("MFA setup not available", "warning");
-        }
-      });
-    }
   } else {
     // Redirect to login page if not authenticated
     window.location.href = "index.html";
